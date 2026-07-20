@@ -1,0 +1,3058 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+public/
+  output.gif
+  output2.gif
+  output3.gif
+  output4.gif
+  output5.gif
+  output6.gif
+src/
+  frontend/
+    app.js
+    index.html
+    style.css
+  __init__.py
+  animations.py
+  concat_video.py
+  main.py
+  manim_generator.py
+  tts_generator.py
+  video_generator.py
+.dockerignore
+.env.example
+.gitignore
+docker-compose.yml
+Dockerfile
+pyproject.toml
+README.md
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="src/frontend/app.js">
+// API Configuration
+const API_BASE_URL = window.location.origin;
+
+// DOM Elements
+const videoForm = document.getElementById('video-form');
+const topicInput = document.getElementById('topic-input');
+const llmSelect = document.getElementById('llm-select');
+const ttsToggle = document.getElementById('tts-toggle');
+const generateBtn = document.getElementById('generate-btn');
+const progressSection = document.getElementById('progress-section');
+const resultSection = document.getElementById('result-section');
+const progressFill = document.getElementById('progress-fill');
+const progressLog = document.getElementById('progress-log');
+const resultVideo = document.getElementById('result-video');
+const downloadBtn = document.getElementById('download-btn');
+
+// Progress steps
+const steps = {
+    script: document.getElementById('step-script'),
+    tts: document.getElementById('step-tts'),
+    code: document.getElementById('step-code'),
+    video: document.getElementById('step-video')
+};
+
+// State
+let currentJobId = null;
+let progressInterval = null;
+
+// Form submission
+videoForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const topic = topicInput.value.trim();
+    if (!topic) return;
+
+    // Reset UI
+    progressSection.classList.remove('hidden');
+    resultSection.classList.add('hidden');
+    resetProgress();
+
+    // Disable form
+    generateBtn.disabled = true;
+    generateBtn.innerHTML = `
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinning">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 6v6l4 2"/>
+        </svg>
+        Generating...
+    `;
+
+    try {
+        // Start video generation
+        const response = await fetch(`${API_BASE_URL}/api/generate`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                topic: topic,
+                llm_provider: llmSelect.value,
+                enable_tts: ttsToggle.checked
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to start video generation');
+        }
+
+        const data = await response.json();
+        currentJobId = data.job_id;
+
+        addLog(`✓ Job started: ${currentJobId}`);
+        addLog(`→ Topic: ${topic}`);
+
+        // Start polling for progress
+        startProgressPolling();
+
+    } catch (error) {
+        console.error('Error:', error);
+        addLog(`✗ Error: ${error.message}`, 'error');
+        resetForm();
+    }
+});
+
+// Progress polling
+function startProgressPolling() {
+    progressInterval = setInterval(async () => {
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/progress/${currentJobId}`);
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch progress');
+            }
+
+            const data = await response.json();
+            updateProgress(data);
+
+            // Check if completed
+            if (data.status === 'completed') {
+                stopProgressPolling();
+                showResult(data.video_url);
+            } else if (data.status === 'failed') {
+                stopProgressPolling();
+                addLog(`✗ Generation failed: ${data.error}`, 'error');
+                resetForm();
+            }
+
+        } catch (error) {
+            console.error('Polling error:', error);
+        }
+    }, 2000); // Poll every 2 seconds
+}
+
+function stopProgressPolling() {
+    if (progressInterval) {
+        clearInterval(progressInterval);
+        progressInterval = null;
+    }
+}
+
+// Update progress UI
+function updateProgress(data) {
+    const { progress, current_step, message } = data;
+
+    // Update progress bar
+    updateProgressBar(progress);
+
+    // Update steps
+    updateSteps(current_step);
+
+    // Add log message
+    if (message) {
+        addLog(message);
+    }
+}
+
+function updateProgressBar(progress) {
+    progressFill.style.width = `${progress}%`;
+    document.querySelector('.progress-percentage').textContent = `${Math.round(progress)}%`;
+}
+
+function updateSteps(currentStep) {
+    const stepOrder = ['script', 'tts', 'code', 'video'];
+    const currentIndex = stepOrder.indexOf(currentStep);
+
+    stepOrder.forEach((stepName, index) => {
+        const stepElement = steps[stepName];
+        if (!stepElement) return;
+
+        stepElement.classList.remove('active', 'completed');
+
+        if (index < currentIndex) {
+            stepElement.classList.add('completed');
+        } else if (index === currentIndex) {
+            stepElement.classList.add('active');
+        }
+    });
+}
+
+function addLog(message, type = 'info') {
+    const timestamp = new Date().toLocaleTimeString();
+    const logEntry = document.createElement('div');
+    logEntry.textContent = `[${timestamp}] ${message}`;
+
+    if (type === 'error') {
+        logEntry.style.color = 'var(--error)';
+    } else if (type === 'success') {
+        logEntry.style.color = 'var(--success)';
+    }
+
+    progressLog.appendChild(logEntry);
+    progressLog.scrollTop = progressLog.scrollHeight;
+}
+
+function resetProgress() {
+    updateProgressBar(0);
+    Object.values(steps).forEach(step => {
+        step.classList.remove('active', 'completed');
+    });
+    progressLog.innerHTML = '';
+}
+
+function resetForm() {
+    generateBtn.disabled = false;
+    generateBtn.innerHTML = `
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+        </svg>
+        Generate Video
+    `;
+}
+
+// Show result
+function showResult(videoUrl) {
+    addLog('✓ Video generation completed!', 'success');
+
+    // Update progress to 100%
+    updateProgressBar(100);
+    Object.values(steps).forEach(step => {
+        step.classList.add('completed');
+        step.classList.remove('active');
+    });
+
+    // Show result section
+    setTimeout(() => {
+        resultSection.classList.remove('hidden');
+        resultVideo.src = videoUrl;
+        downloadBtn.href = videoUrl;
+
+        // Scroll to result
+        resultSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+        resetForm();
+    }, 1000);
+}
+
+// Smooth scroll for navigation
+document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+    anchor.addEventListener('click', function (e) {
+        e.preventDefault();
+        const target = document.querySelector(this.getAttribute('href'));
+        if (target) {
+            target.scrollIntoView({ behavior: 'smooth' });
+        }
+    });
+});
+
+// Add spinning animation for loading state
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+    .spinning {
+        animation: spin 1s linear infinite;
+    }
+`;
+document.head.appendChild(style);
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+    stopProgressPolling();
+});
+</file>
+
+<file path="src/frontend/index.html">
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prompt2Learn.ai - AI Educational Video Generator</title>
+    <meta name="description"
+        content="Transform any topic into professional educational videos with AI-powered animations">
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <div class="background-gradient"></div>
+
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <div class="logo">
+                <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect width="40" height="40" rx="8" fill="url(#logo-gradient)" />
+                    <path d="M12 20L18 14L24 20L30 14" stroke="white" stroke-width="2.5" stroke-linecap="round"
+                        stroke-linejoin="round" />
+                    <circle cx="18" cy="26" r="2" fill="white" />
+                    <circle cx="24" cy="26" r="2" fill="white" />
+                    <defs>
+                        <linearGradient id="logo-gradient" x1="0" y1="0" x2="40" y2="40">
+                            <stop offset="0%" stop-color="#6366f1" />
+                            <stop offset="100%" stop-color="#8b5cf6" />
+                        </linearGradient>
+                    </defs>
+                </svg>
+                <span class="logo-text">Prompt2Learn.ai</span>
+            </div>
+            <nav class="nav">
+                <a href="#features" class="nav-link">Features</a>
+                <a href="https://github.com/mateolafalce/prompt2learn.ai" target="_blank" class="nav-link">GitHub</a>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h1 class="hero-title">
+                    Transform Topics into
+                    <span class="gradient-text">Educational Videos</span>
+                </h1>
+                <p class="hero-subtitle">
+                    AI-powered video generation with Manim animations. Just enter a topic and let our multi-agent system
+                    create professional educational content.
+                </p>
+
+                <!-- Video Generator Form -->
+                <div class="generator-card">
+                    <form id="video-form" class="video-form">
+                        <div class="form-group">
+                            <label for="topic-input" class="form-label">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                                    <path d="M2 17l10 5 10-5M2 12l10 5 10-5" />
+                                </svg>
+                                Enter Your Topic
+                            </label>
+                            <input type="text" id="topic-input" class="topic-input"
+                                placeholder="e.g., How does machine learning work?" required />
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="llm-select" class="form-label">LLM Provider</label>
+                                <select id="llm-select" class="form-select">
+                                    <option value="auto">Auto (Gemini → Claude → OpenAI)</option>
+                                    <option value="gemini-lite">Gemini 3.1 Lite</option>
+                                    <option value="gemini-flash">Gemini 3.5 Flash</option>
+                                    <option value="gemini-pro">Gemini 3.1 Pro</option>
+                                    <option value="claude">Claude</option>
+                                    <option value="openai">OpenAI</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="tts-toggle" class="form-label">Enable TTS</label>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="tts-toggle" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn-primary" id="generate-btn">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <polygon points="5 3 19 12 5 21 5 3" />
+                            </svg>
+                            Generate Video
+                        </button>
+                    </form>
+
+                    <!-- Progress Section -->
+                    <div id="progress-section" class="progress-section hidden">
+                        <div class="progress-header">
+                            <h3 class="progress-title">Generating Your Video</h3>
+                            <span class="progress-percentage">0%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progress-fill"></div>
+                        </div>
+                        <div class="progress-steps">
+                            <div class="step" id="step-script">
+                                <div class="step-icon">1</div>
+                                <span class="step-label">Script Generation</span>
+                            </div>
+                            <div class="step" id="step-tts">
+                                <div class="step-icon">2</div>
+                                <span class="step-label">Audio Synthesis</span>
+                            </div>
+                            <div class="step" id="step-code">
+                                <div class="step-icon">3</div>
+                                <span class="step-label">Code Generation</span>
+                            </div>
+                            <div class="step" id="step-video">
+                                <div class="step-icon">4</div>
+                                <span class="step-label">Video Compilation</span>
+                            </div>
+                        </div>
+                        <div class="progress-log" id="progress-log"></div>
+                    </div>
+
+                    <!-- Result Section -->
+                    <div id="result-section" class="result-section hidden">
+                        <div class="result-header">
+                            <h3 class="result-title">✨ Video Generated Successfully!</h3>
+                        </div>
+                        <video id="result-video" class="result-video" controls></video>
+                        <div class="result-actions">
+                            <a id="download-btn" class="btn-secondary" download>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                    <polyline points="7 10 12 15 17 10" />
+                                    <line x1="12" y1="15" x2="12" y2="3" />
+                                </svg>
+                                Download Video
+                            </a>
+                            <button class="btn-outline" onclick="location.reload()">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <polyline points="23 4 23 10 17 10" />
+                                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                                </svg>
+                                Generate Another
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="features">
+        <div class="container">
+            <h2 class="section-title">Powerful Features</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path
+                                d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                            <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                            <line x1="12" y1="22.08" x2="12" y2="12" />
+                        </svg>
+                    </div>
+                    <h3 class="feature-title">Multi-LLM Support</h3>
+                    <p class="feature-description">Automatic fallback between Claude and OpenAI for maximum reliability
+                    </p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
+                            <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+                        </svg>
+                    </div>
+                    <h3 class="feature-title">Manim Animations</h3>
+                    <p class="feature-description">Professional mathematical and educational animations powered by Manim
+                    </p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                            <line x1="12" y1="19" x2="12" y2="23" />
+                            <line x1="8" y1="23" x2="16" y2="23" />
+                        </svg>
+                    </div>
+                    <h3 class="feature-title">TTS Integration</h3>
+                    <p class="feature-description">Natural voice narration with OpenAI's text-to-speech technology</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="M12 6v6l4 2" />
+                        </svg>
+                    </div>
+                    <h3 class="feature-title">60-Second Videos</h3>
+                    <p class="feature-description">Optimized content delivery in concise, engaging 1-minute videos</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M5 22h14" />
+                            <path d="M5 2h14" />
+                            <path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22" />
+                            <path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2" />
+                        </svg>
+                    </div>
+                    <h3 class="feature-title">Multi-Language</h3>
+                    <p class="feature-description">Automatic language detection and content generation in any language
+                    </p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                        </svg>
+                    </div>
+                    <h3 class="feature-title">Context Aware</h3>
+                    <p class="feature-description">Maintains visual continuity across scenes with intelligent context
+                        propagation</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <div class="logo">
+                        <svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect width="40" height="40" rx="8" fill="url(#footer-logo-gradient)" />
+                            <path d="M12 20L18 14L24 20L30 14" stroke="white" stroke-width="2.5" stroke-linecap="round"
+                                stroke-linejoin="round" />
+                            <circle cx="18" cy="26" r="2" fill="white" />
+                            <circle cx="24" cy="26" r="2" fill="white" />
+                            <defs>
+                                <linearGradient id="footer-logo-gradient" x1="0" y1="0" x2="40" y2="40">
+                                    <stop offset="0%" stop-color="#6366f1" />
+                                    <stop offset="100%" stop-color="#8b5cf6" />
+                                </linearGradient>
+                            </defs>
+                        </svg>
+                        <span class="logo-text">Prompt2Learn.ai</span>
+                    </div>
+                    <p class="footer-tagline">AI-powered educational video generation</p>
+                </div>
+                <div class="footer-links">
+                    <a href="https://github.com/mateolafalce/prompt2learn.ai" target="_blank" class="footer-link">GitHub</a>
+                    <a href="https://github.com/mateolafalce/prompt2learn.ai/issues" target="_blank"
+                        class="footer-link">Report Issue</a>
+                    <a href="https://github.com/mateolafalce" target="_blank" class="footer-link">Developer</a>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2026 Prompt2Learn.ai. Open Source Project.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="/static/app.js"></script>
+</body>
+
+</html>
+</file>
+
+<file path="src/frontend/style.css">
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+    background: #f5f5f5;
+    color: #333;
+    line-height: 1.6;
+}
+
+.background-gradient {
+    display: none;
+}
+
+.container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 0 20px;
+}
+
+/* Header */
+.header {
+    background: white;
+    border-bottom: 1px solid #ddd;
+    padding: 15px 0;
+}
+
+.header .container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.logo-text {
+    font-size: 18px;
+    font-weight: 600;
+    color: #333;
+}
+
+.nav {
+    display: flex;
+    gap: 20px;
+}
+
+.nav-link {
+    color: #666;
+    text-decoration: none;
+    font-size: 14px;
+}
+
+.nav-link:hover {
+    color: #333;
+}
+
+/* Hero */
+.hero {
+    padding: 60px 0 40px;
+    text-align: center;
+}
+
+.hero-title {
+    font-size: 36px;
+    font-weight: 700;
+    margin-bottom: 15px;
+    color: #222;
+}
+
+.gradient-text {
+    color: #4a5fff;
+}
+
+.hero-subtitle {
+    font-size: 16px;
+    color: #666;
+    margin-bottom: 30px;
+}
+
+/* Form Card */
+.generator-card {
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 30px;
+    margin-bottom: 30px;
+}
+
+.video-form {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.form-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    font-size: 13px;
+    color: #333;
+}
+
+.topic-input,
+.form-select {
+    width: 100%;
+    padding: 12px;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    font-family: inherit;
+}
+
+.topic-input:focus,
+.form-select:focus {
+    outline: none;
+    border-color: #4a5fff;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 20px;
+    align-items: end;
+}
+
+/* Toggle */
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 50px;
+    height: 28px;
+}
+
+.toggle-switch input {
+    display: none;
+}
+
+.toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: #ccc;
+    border-radius: 28px;
+    cursor: pointer;
+    transition: 0.3s;
+}
+
+.toggle-slider::before {
+    content: '';
+    position: absolute;
+    height: 20px;
+    width: 20px;
+    left: 4px;
+    bottom: 4px;
+    background: white;
+    border-radius: 50%;
+    transition: 0.3s;
+}
+
+.toggle-switch input:checked+.toggle-slider {
+    background: #4a5fff;
+}
+
+.toggle-switch input:checked+.toggle-slider::before {
+    transform: translateX(22px);
+}
+
+/* Buttons */
+.btn-primary,
+.btn-secondary,
+.btn-outline {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 24px;
+    font-size: 14px;
+    font-weight: 600;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    text-decoration: none;
+    font-family: inherit;
+}
+
+.btn-primary {
+    background: #4a5fff;
+    color: white;
+}
+
+.btn-primary:hover {
+    background: #3a4fdd;
+}
+
+.btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-secondary {
+    background: white;
+    color: #333;
+    border: 1px solid #ddd;
+}
+
+.btn-secondary:hover {
+    border-color: #4a5fff;
+}
+
+.btn-outline {
+    background: transparent;
+    color: #333;
+    border: 1px solid #ddd;
+}
+
+.btn-outline:hover {
+    border-color: #4a5fff;
+    color: #4a5fff;
+}
+
+/* Progress */
+.progress-section,
+.result-section {
+    margin-top: 30px;
+}
+
+.hidden {
+    display: none !important;
+}
+
+.progress-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 15px;
+}
+
+.progress-title {
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.progress-percentage {
+    font-size: 20px;
+    font-weight: 700;
+    color: #4a5fff;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 6px;
+    background: #e0e0e0;
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 20px;
+}
+
+.progress-fill {
+    height: 100%;
+    background: #4a5fff;
+    width: 0%;
+    transition: width 0.3s;
+}
+
+.progress-steps {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 15px;
+    background: #f9f9f9;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.step.active {
+    border-color: #4a5fff;
+    background: #f0f2ff;
+}
+
+.step.completed {
+    border-color: #10b981;
+    background: #f0fdf4;
+}
+
+.step-icon {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #e0e0e0;
+    border-radius: 50%;
+    font-weight: 600;
+    font-size: 16px;
+}
+
+.step.active .step-icon {
+    background: #4a5fff;
+    color: white;
+}
+
+.step.completed .step-icon {
+    background: #10b981;
+    color: white;
+}
+
+.step-label {
+    font-size: 12px;
+    font-weight: 500;
+    text-align: center;
+    color: #666;
+}
+
+.step.active .step-label,
+.step.completed .step-label {
+    color: #333;
+}
+
+.progress-log {
+    max-height: 200px;
+    overflow-y: auto;
+    padding: 15px;
+    background: #f9f9f9;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 12px;
+    color: #555;
+}
+
+/* Result */
+.result-title {
+    font-size: 20px;
+    font-weight: 600;
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.result-video {
+    width: 100%;
+    border-radius: 4px;
+    margin-bottom: 20px;
+}
+
+.result-actions {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+}
+
+/* Features */
+.features {
+    padding: 60px 0;
+    background: white;
+}
+
+.section-title {
+    font-size: 32px;
+    font-weight: 700;
+    text-align: center;
+    margin-bottom: 40px;
+}
+
+.features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 20px;
+}
+
+.feature-card {
+    padding: 25px;
+    background: #f9f9f9;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.feature-icon {
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #4a5fff;
+    border-radius: 4px;
+    margin-bottom: 15px;
+    color: white;
+}
+
+.feature-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 10px;
+}
+
+.feature-description {
+    color: #666;
+    font-size: 14px;
+}
+
+/* How it Works */
+.how-it-works {
+    padding: 60px 0;
+}
+
+.workflow-steps {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+
+.workflow-step {
+    flex: 1;
+    min-width: 200px;
+    max-width: 220px;
+    padding: 25px 20px;
+    background: white;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    text-align: center;
+}
+
+.workflow-number {
+    font-size: 36px;
+    font-weight: 700;
+    color: #4a5fff;
+    margin-bottom: 10px;
+}
+
+.workflow-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.workflow-description {
+    font-size: 13px;
+    color: #666;
+}
+
+.workflow-arrow {
+    font-size: 24px;
+    color: #999;
+}
+
+/* Footer */
+.footer {
+    padding: 40px 0 20px;
+    border-top: 1px solid #ddd;
+    background: white;
+}
+
+.footer-content {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.footer-tagline {
+    color: #666;
+    font-size: 13px;
+}
+
+.footer-links {
+    display: flex;
+    gap: 20px;
+}
+
+.footer-link {
+    color: #666;
+    text-decoration: none;
+    font-size: 13px;
+}
+
+.footer-link:hover {
+    color: #4a5fff;
+}
+
+.footer-bottom {
+    text-align: center;
+    padding-top: 20px;
+    border-top: 1px solid #ddd;
+    color: #999;
+    font-size: 13px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .hero-title {
+        font-size: 28px;
+    }
+
+    .generator-card {
+        padding: 20px;
+    }
+
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+
+    .progress-steps {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .workflow-steps {
+        flex-direction: column;
+    }
+
+    .workflow-arrow {
+        transform: rotate(90deg);
+    }
+
+    .footer-content {
+        flex-direction: column;
+        gap: 20px;
+        text-align: center;
+    }
+
+    .nav {
+        gap: 15px;
+    }
+
+    .section-title {
+        font-size: 24px;
+    }
+}
+</file>
+
+<file path="src/__init__.py">
+# Prompt2Learn.ai package
+</file>
+
+<file path="src/animations.py">
+import json
+import re
+import os
+import time
+from dotenv import load_dotenv
+from google.genai import types
+
+# Load environment variables
+load_dotenv()
+
+def generate_script_json(client, topic_name, output_file="video-output.json", provider='openai', model='gpt-4o', max_retries=3):
+    """Generates the JSON file with script and animations using the LLM with automatic retries"""
+    prompt = f"""Develop an educational script for this topic: {topic_name}
+
+INSTRUCTIONS:
+- Create an engaging and educational script about the topic
+- Divide the script into logical scenes/fragments (between 6-8 scenes)
+- For each scene, provide:
+  1. The script text (narration) - BRIEF and CONCISE
+  2. A detailed description of the Manim animation that should accompany that text
+- Avoid using commercial logos (like ChatGPT, OpenAI, etc.)
+- I DON'T want Python Manim code, just the description of what you want to visualize
+- Animations should be specific and detailed so they can be implemented in Manim
+
+LANGUAGE REQUIREMENT:
+- The script and animations MUST be in the SAME LANGUAGE as the topic
+- If the topic is in Spanish, write everything in Spanish
+- If the topic is in English, write everything in English
+- Match the language exactly
+
+CRITICAL TIME RESTRICTION:
+- The COMPLETE video must last MAXIMUM 60 seconds (1 minute)
+- Each scene should last approximately 6-8 seconds
+- The text of each scene must be SHORT (maximum 2-3 sentences)
+- Animations must be SIMPLE and FAST
+
+OUTPUT FORMAT (JSON):
+Respond ONLY with a valid JSON array, where each element has this structure:
+{{
+  "text": "script text for this scene (BRIEF, 2-3 sentences maximum)",
+  "animation": "detailed description of the specific animation for this fragment"
+}}
+
+Example of a scene:
+{{
+  "text": "Language models process text by converting it into numbers.",
+  "animation": "Show the word 'Hello' in the center. Then, divide it into visual tokens with colored boxes. Finally, transform each token into a number (ID) with a morphing animation."
+}}
+
+IMPORTANT: Respond ONLY with the JSON array, without any additional text before or after."""
+
+    
+    # Retry loop for handling API failures
+    for attempt in range(max_retries):
+        try:
+            print(f"Generating script for: {topic_name}... (Attempt {attempt + 1}/{max_retries})")
+            
+            if provider == 'openai':
+                # OpenAI API call
+                # Note: For reasoning models (o1, gpt-5-nano), we need extra tokens
+                # because they use tokens for internal reasoning before producing output
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": "You are an expert in creating educational video scripts. You always respond in valid JSON format without additional text. IMPORTANT: Match the language of the topic exactly - if the topic is in Spanish, write in Spanish; if in English, write in English."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_completion_tokens=16000  # Increased for reasoning models
+                )
+                
+                # Debug: Print full response structure
+                print(f"[DEBUG] Full response object: {response}")
+                print(f"[DEBUG] Response choices: {response.choices}")
+                
+                if not response.choices:
+                    print(f"[ERROR] No choices in response")
+                    raise Exception("No choices in OpenAI response")
+                
+                content = response.choices[0].message.content
+                if content is None:
+                    print(f"[ERROR] message.content is None")
+                    print(f"[DEBUG] Full message: {response.choices[0].message}")
+                    print(f"[DEBUG] Finish reason: {response.choices[0].finish_reason}")
+                    raise Exception(f"OpenAI returned None content. Finish reason: {response.choices[0].finish_reason}")
+                
+                response_text = content.strip()
+                
+            elif provider == 'claude':
+                # Claude API call
+                response = client.messages.create(
+                    model=model,
+                    max_tokens=4000,
+                    system="You are an expert in creating educational video scripts. You always respond in valid JSON format without additional text. IMPORTANT: Match the language of the topic exactly - if the topic is in Spanish, write in Spanish; if in English, write in English.",
+                    messages=[
+                        {"role": "user", "content": prompt}
+                    ]
+                )
+                response_text = response.content[0].text.strip()
+            
+            elif provider == 'gemini':
+                # Gemini API call
+                response = client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction="You are an expert in creating educational video scripts. You always respond in valid JSON format without additional text. IMPORTANT: Match the language of the topic exactly - if the topic is in Spanish, write in Spanish; if in English, write in English.",
+                        response_mime_type="application/json"
+                    )
+                )
+                response_text = response.text.strip()
+            
+            else:
+                raise ValueError(f"Unknown provider: {provider}")
+            
+            # Debug: Print the raw response
+            print(f"[DEBUG] Raw API response length: {len(response_text)} characters")
+            if len(response_text) == 0:
+                print(f"[ERROR] Empty response from {provider} API")
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                    print(f"[RETRY] Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    print(f"[ERROR] Max retries reached. Giving up.")
+                    return None
+            
+            # Show first 200 chars for debugging
+            print(f"[DEBUG] Response preview: {response_text[:200]}...")
+            
+            # Try to extract JSON if wrapped in markdown
+            if "```json" in response_text:
+                response_text = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL).group(1)
+            elif "```" in response_text:
+                response_text = re.search(r'```\s*(.*?)\s*```', response_text, re.DOTALL).group(1)
+            
+            # Parse JSON
+            try:
+                script_data = json.loads(response_text)
+            except json.JSONDecodeError as json_err:
+                print(f"[ERROR] Failed to parse JSON: {json_err}")
+                print(f"[ERROR] Response text: {response_text[:500]}")
+                
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    print(f"[RETRY] Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    print(f"[ERROR] Max retries reached. Giving up.")
+                    return None
+            
+            # Save to file
+            with open(output_file, 'w', encoding='utf-8') as f:
+                json.dump(script_data, f, ensure_ascii=False, indent=2)
+            
+            print(f"[OK] Script generated successfully: {output_file}")
+            print(f"Total scenes: {len(script_data)}")
+            
+            return script_data
+            
+        except Exception as e:
+            print(f"[ERROR] Error generating script: {e}")
+            
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt
+                print(f"[RETRY] Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+                continue
+            else:
+                print(f"[ERROR] Max retries reached. Giving up.")
+                import traceback
+                traceback.print_exc()
+                return None
+    
+    # Should never reach here, but just in case
+    return None
+</file>
+
+<file path="src/concat_video.py">
+import subprocess
+import os
+import re
+
+def sanitize_filename(filename):
+    """Remove or replace problematic characters from filenames"""
+    # Remove apostrophes, question marks, and other special characters
+    # Replace with underscores or remove them
+    sanitized = re.sub(r"['\"\?!:;,\(\)\[\]\{\}]", "", filename)
+    # Replace multiple underscores with single underscore
+    sanitized = re.sub(r"_+", "_", sanitized)
+    # Remove leading/trailing underscores
+    sanitized = sanitized.strip("_")
+    return sanitized
+
+def compile_video(file_path, class_name, topic_slug, index):
+    """Compiles the video using Manim
+    
+    Returns:
+        tuple: (video_path, error_message) - video_path is None if failed, error_message is None if success
+    """
+    try:
+        cmd = ["manim", "-ql", file_path, class_name]
+        print(f"\nCompiling: {' '.join(cmd)}")
+        
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 minutes timeout
+        )
+        
+        if result.returncode == 0:
+            print(f"[OK] Video compiled successfully")
+            # Manim creates directory based on the Python filename (without extension)
+            # Extract filename without extension from file_path
+            filename_without_ext = os.path.splitext(os.path.basename(file_path))[0]
+            # Video will be in media/videos/{filename_without_extension}/480p15/{class_name}.mp4
+            video_path = f"media/videos/{filename_without_ext}/480p15/{class_name}.mp4"
+            return video_path, None
+        else:
+            error_msg = result.stderr
+            print(f"[ERROR] Error compiling video:")
+            print(error_msg)
+            return None, error_msg
+            
+    except subprocess.TimeoutExpired:
+        error_msg = "Timeout: Compilation took more than 5 minutes"
+        print(f"[ERROR] {error_msg}")
+        return None, error_msg
+    except Exception as e:
+        error_msg = str(e)
+        print(f"[ERROR] Error: {error_msg}")
+        return None, error_msg
+
+
+def concatenate_videos(video_paths, output_path):
+    """Joins all videos into one using ffmpeg"""
+    if not video_paths:
+        print("[ERROR] No videos to concatenate")
+        return False
+    
+    # Create media folder if it doesn't exist
+    os.makedirs("media", exist_ok=True)
+    
+    # Create list file for ffmpeg
+    list_file = "media/video_list.txt"
+    with open(list_file, 'w') as f:
+        for video_path in video_paths:
+            if os.path.exists(video_path):
+                f.write(f"file '../{video_path}'\n")
+    
+    try:
+        cmd = [
+            "ffmpeg", "-f", "concat", "-safe", "0",
+            "-i", list_file,
+            "-c", "copy",
+            output_path,
+            "-y"  # Overwrite if exists
+        ]
+        
+        print(f"\n  Concatenating videos...")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            print(f"[OK] Final video created: {output_path}")
+            # Clean up temporary file
+            os.remove(list_file)
+            return True
+        else:
+            print(f"[ERROR] Error concatenating videos:")
+            print(result.stderr)
+            return False
+            
+    except Exception as e:
+        print(f"[ERROR] Error: {e}")
+        return False
+
+
+def merge_video_and_audio(video_path, audio_path, output_path):
+    """
+    Merges video and audio files into a single MP4 file using ffmpeg
+    
+    Args:
+        video_path: Path to the video file (without audio)
+        audio_path: Path to the audio file (MP3)
+        output_path: Path for the final merged video
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    if not os.path.exists(video_path):
+        print(f"[ERROR] Video file not found: {video_path}")
+        return False
+    
+    if not os.path.exists(audio_path):
+        print(f"[ERROR] Audio file not found: {audio_path}")
+        return False
+    
+    try:
+        cmd = [
+            "ffmpeg",
+            "-i", video_path,  # Input video
+            "-i", audio_path,  # Input audio
+            "-c:v", "copy",    # Copy video codec (no re-encoding)
+            "-c:a", "aac",     # Encode audio to AAC
+            "-map", "0:v:0",   # Map video from first input
+            "-map", "1:a:0",   # Map audio from second input
+            output_path,
+            "-y"               # Overwrite if exists
+        ]
+        
+        print(f"\n{'='*80}")
+        print(f"MERGING VIDEO AND AUDIO")
+        print(f"{'='*80}")
+        print(f"Video: {video_path}")
+        print(f"Audio: {audio_path}")
+        print(f"Output: {output_path}\n")
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            print(f"[OK] Final video with audio created: {output_path}\n")
+            return True
+        else:
+            print(f"[ERROR] Error merging video and audio:")
+            print(result.stderr)
+            return False
+            
+    except Exception as e:
+        print(f"[ERROR] Error: {e}")
+        return False
+</file>
+
+<file path="src/main.py">
+from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask_cors import CORS
+import os
+import sys
+from pathlib import Path
+
+# Add parent directory to path to enable imports
+sys.path.insert(0, str(Path(__file__).parent))
+
+from video_generator import start_video_generation, get_job_status
+
+# Get absolute path to frontend directory
+FRONTEND_DIR = Path(__file__).parent / 'frontend'
+
+app = Flask(__name__, 
+            static_folder=str(FRONTEND_DIR),
+            static_url_path='/static')
+CORS(app)
+
+# Ensure media directory exists (at project root level)
+PROJECT_ROOT = Path(__file__).parent.parent
+MEDIA_DIR = PROJECT_ROOT / 'media'
+os.makedirs(MEDIA_DIR, exist_ok=True)
+
+
+@app.route('/')
+def index():
+    """Serve the main HTML page"""
+    return send_from_directory(FRONTEND_DIR, 'index.html')
+
+
+@app.route('/api/generate', methods=['POST'])
+def generate_video():
+    """Start video generation"""
+    try:
+        data = request.get_json()
+        
+        topic = data.get('topic')
+        if not topic:
+            return jsonify({'error': 'Topic is required'}), 400
+        
+        llm_provider = data.get('llm_provider', 'auto')
+        enable_tts = data.get('enable_tts', True)
+        
+        # Start video generation
+        job_id = start_video_generation(topic, enable_tts, llm_provider)
+        
+        return jsonify({
+            'job_id': job_id,
+            'status': 'queued',
+            'message': 'Video generation started'
+        }), 202
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/progress/<job_id>', methods=['GET'])
+def get_progress(job_id):
+    """Get video generation progress"""
+    job = get_job_status(job_id)
+    
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+    
+    return jsonify(job)
+
+
+@app.route('/media/<path:filename>')
+def serve_media(filename):
+    """Serve generated media files"""
+    return send_from_directory(MEDIA_DIR, filename)
+
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        'status': 'healthy',
+        'service': 'Prompt2Learn.ai API'
+    })
+
+
+if __name__ == '__main__':
+    print("=" * 80)
+    print("Prompt2Learn.ai Server")
+    print("=" * 80)
+    print("Starting Flask server...")
+    print("Access the web interface at: http://localhost:5000")
+    print("=" * 80)
+    print("\nNOTE: Auto-reload is disabled to prevent job state loss during video generation")
+    print("      Restart the server manually if you make code changes.\n")
+    
+    app.run(
+        host='0.0.0.0',
+        port=5000,
+        debug=True,
+        use_reloader=False,  # Disable auto-reload to prevent losing job state
+        threaded=True
+    )
+</file>
+
+<file path="src/manim_generator.py">
+import json
+import re
+import os
+import time
+from dotenv import load_dotenv
+from google.genai import types
+
+# Load environment variables
+load_dotenv()
+
+def generate_manim_code(client, text, animation, index, previous_context=None, provider='openai', model='gpt-4o', audio_duration=None, max_retries=3):
+    """Generates Manim code using the LLM with previous scene context, audio duration, and automatic retries"""
+    
+    # Build context section if it exists
+    context_section = ""
+    if previous_context:
+        context_section = f"""
+PREVIOUS SCENE CONTEXT (to maintain continuity):
+- Previous text: {previous_context.get('text', 'N/A')}
+- Previous animation: {previous_context.get('animation', 'N/A')}
+- Previous generated code:
+```python
+{previous_context.get('code', 'N/A')}
+```
+
+IMPORTANT: Maintain visual and narrative coherence with the previous scene.
+If the previous scene ended with certain elements or style, consider that when designing this scene.
+"""
+    else:
+        context_section = """
+CONTEXT: This is the FIRST scene of the video.
+"""
+    
+    # Add audio duration information if available
+    duration_section = ""
+    if audio_duration:
+        duration_section = f"""
+CRITICAL AUDIO SYNCHRONIZATION:
+- This scene has an audio narration that lasts EXACTLY {audio_duration:.2f} seconds
+- Your animation MUST last EXACTLY {audio_duration:.2f} seconds (not more, not less)
+- Calculate your animation timings to match this duration:
+  * Use self.wait() strategically to fill the time
+  * Adjust run_time parameters in animations to fit within {audio_duration:.2f}s
+  * The total of all animation run_times + wait times MUST equal {audio_duration:.2f}s
+- Example timing breakdown for {audio_duration:.2f}s:
+  * If you have 3 animations, each could be ~{audio_duration/3:.2f}s
+  * Include small waits between animations for better pacing
+"""
+    else:
+        duration_section = """
+TIMING GUIDANCE:
+- This scene should last approximately 6-8 seconds
+- Use short run_time in animations (0.5-1.5 seconds)
+- Minimize use of self.wait() (maximum 0.5-1 second)
+"""
+    
+    prompt = f"""{context_section}
+
+Generate Python code for Manim that implements this educational animation.
+
+CURRENT CONTENT:
+- Narrative text: {text}
+- Animation description: {animation}
+
+{duration_section}
+
+IMPORTANT TECHNICAL RESTRICTIONS:
+1. The class MUST inherit from Scene (not MovingCameraScene, not ThreeDScene)
+2. DO NOT use self.camera.frame (doesn't exist in Scene)
+3. For zoom, use: object.animate.scale(factor) instead of camera.frame
+4. Keep animations SIMPLE and FUNCTIONAL
+5. Use only basic animations: Write, Create, FadeIn, FadeOut, Transform, ReplacementTransform
+6. Avoid complex 3D animations
+7. If you need camera movement, use self.play(self.camera.animate.move_to(...)) but WITHOUT .frame
+8. NEVER create empty Text or Paragraph objects (Text('') or Paragraph(''))
+9. NEVER use positioning methods (.move_to(), .align_to(), .next_to()) on empty Text/Paragraph objects
+10. If you need placeholder text, use actual text like Text("Placeholder") instead of Text('')
+
+CRITICAL COLOR USAGE RULES:
+1. ONLY use these basic colors that are always available: WHITE, BLACK, RED, GREEN, BLUE, YELLOW, PURPLE, ORANGE, PINK, GRAY
+2. DO NOT use color variants like RED_A, RED_B, ORANGE_D, BLUE_E, etc. (they may not be imported)
+3. If you need custom colors, use hex codes: color="#FF5733" or RGB: rgb_to_color([1, 0.5, 0.2])
+4. For gradients or multiple colors, stick to the basic colors listed above
+5. Example CORRECT usage: Circle(color=RED), Text("Hello", color=BLUE)
+6. Example INCORRECT usage: Circle(color=ORANGE_D), Text("Hello", color=RED_A)
+
+CRITICAL RULES TO AVOID TEXT OVERLAP:
+VERY IMPORTANT - SCREEN SPACE MANAGEMENT:
+1. ALWAYS use FadeOut() to remove old elements BEFORE showing new ones
+2. If showing multiple texts/objects, position them in DIFFERENT places (UP, DOWN, LEFT, RIGHT)
+3. Use self.clear() if you need to clear the entire scene
+4. DO NOT write new text over existing text without removing it first
+5. Keep a maximum of 2-3 text elements on screen simultaneously
+6. Use .to_edge(UP/DOWN) or .shift(UP/DOWN) to separate elements vertically
+
+GOOD PRACTICE EXAMPLE:
+```python
+# Show first text
+text1 = Text("First concept")
+self.play(Write(text1))
+self.wait(1)
+
+# REMOVE before showing the next one
+self.play(FadeOut(text1))  # CORRECT
+
+# Now show second text
+text2 = Text("Second concept")
+self.play(Write(text2))
+self.wait(1)
+```
+
+BAD PRACTICE EXAMPLE (DON'T DO THIS):
+```python
+text1 = Text("First concept")
+self.play(Write(text1))
+text2 = Text("Second concept")  # INCORRECT - overlaps
+self.play(Write(text2))
+```
+
+RULES TO CONTROL TEXT WIDTH:
+CRITICAL - TEXT MUST NOT GO OFF SCREEN:
+1. For LONG texts (>80 characters), use Paragraph() instead of Text()
+2. Use the width parameter to limit width: Text("...", width=10) or Paragraph("...", width=11)
+3. Appropriate font size: font_size=24-36 for long texts, 40-48 for short titles
+4. If the text is VERY long, divide it into multiple Text/Paragraph objects
+5. Use line_spacing in Paragraph for better readability
+6. Maximum recommended width is width=12 (to leave margins)
+
+EXAMPLE FOR LONG TEXTS:
+```python
+# CORRECT - Long text with Paragraph
+long_text = Paragraph(
+    'This is a very long text that needs to be displayed on screen without going off the edges.',
+    width=11,  # Limit width
+    font_size=28,
+    line_spacing=1.2
+)
+self.play(Write(long_text))
+self.wait(2)
+self.play(FadeOut(long_text))
+```
+
+EXAMPLE FOR SHORT TEXTS:
+```python
+# CORRECT - Short text with Text
+short_text = Text("Short title", font_size=48)
+self.play(Write(short_text))
+```
+
+EXAMPLE DIVIDING LONG TEXT:
+```python
+# CORRECT - Divide into parts
+part1 = Paragraph("First part of long text...", width=11, font_size=30).to_edge(UP)
+self.play(Write(part1))
+self.wait(2)
+self.play(FadeOut(part1))
+
+part2 = Paragraph("Second part of text...", width=11, font_size=30).to_edge(UP)
+self.play(Write(part2))
+```
+
+RECOMMENDED ANIMATIONS:
+- Text: Write(), FadeIn(), AddTextLetterByLetter()
+- Shapes: Create(), DrawBorderThenFill(), GrowFromCenter()
+- Transformations: Transform(), ReplacementTransform(), TransformFromCopy()
+- Movement: obj.animate.shift(), obj.animate.move_to(), obj.animate.scale()
+- Cleanup: FadeOut(), self.clear(), self.remove()
+- Groups: VGroup to group objects
+
+CODE STRUCTURE:
+```python
+from manim import *
+
+class ClassName(Scene):
+    def construct(self):
+        # Your code here
+        # Simple example:
+        text = Text("Hello")
+        self.play(Write(text))
+        self.wait(1)
+        # Clean before next element
+        self.play(FadeOut(text))
+```
+
+RESPONSE FORMAT (JSON):
+{{
+  "content": "complete Python code here (use single quotes inside the code)",
+  "class_name": "ClassName"
+}}
+
+IMPORTANT: 
+- The code must be executable without errors
+- Escape quotes correctly in the JSON
+- Keep the animation simple but effective
+- ALWAYS clean old elements before showing new ones
+"""
+    
+    
+    # Retry loop for handling API failures
+    for attempt in range(max_retries):
+        try:
+            print(f"[Scene {index}] Generating Manim code... (Attempt {attempt + 1}/{max_retries})")
+            
+            if provider == 'openai':
+                # OpenAI API call
+                # Note: For reasoning models, we need extra tokens for reasoning + output
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": "You are an expert in Manim Community Edition (v0.19.1). You generate simple, functional Python code without errors. NEVER use self.camera.frame in Scene. Always respond in valid JSON format."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_completion_tokens=16000
+                )
+                
+                content = response.choices[0].message.content
+                if content is None:
+                    print(f"[ERROR] OpenAI returned None content for scene {index}")
+                    print(f"[DEBUG] Finish reason: {response.choices[0].finish_reason}")
+                    raise Exception(f"OpenAI returned None content. Finish reason: {response.choices[0].finish_reason}")
+                
+                response_text = content.strip()
+                
+            elif provider == 'claude':
+                # Claude API call
+                response = client.messages.create(
+                    model=model,
+                    max_tokens=4000,
+                    system="You are an expert in Manim Community Edition (v0.19.1). You generate simple, functional Python code without errors. NEVER use self.camera.frame in Scene. Always respond in valid JSON format.",
+                    messages=[
+                        {"role": "user", "content": prompt}
+                    ]
+                )
+                response_text = response.content[0].text.strip()
+            
+            elif provider == 'gemini':
+                # Gemini API call
+                response = client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction="You are an expert in Manim Community Edition (v0.19.1). You generate simple, functional Python code without errors. NEVER use self.camera.frame in Scene. Always respond in valid JSON format.",
+                        response_mime_type="application/json"
+                    )
+                )
+                response_text = response.text.strip()
+            
+            else:
+                raise ValueError(f"Unknown provider: {provider}")
+            
+            # Check for empty response
+            if len(response_text) == 0:
+                print(f"[ERROR] Empty response from {provider} API for scene {index}")
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    print(f"[RETRY] Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    print(f"[ERROR] Max retries reached for scene {index}. Giving up.")
+                    return None
+            
+            # Try to extract JSON if wrapped in markdown
+            if "```json" in response_text:
+                response_text = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL).group(1)
+            elif "```" in response_text:
+                response_text = re.search(r'```\s*(.*?)\s*```', response_text, re.DOTALL).group(1)
+            
+            # Parse JSON
+            try:
+                result = json.loads(response_text)
+                print(f"[OK] Manim code generated for scene {index}")
+                return result
+            except json.JSONDecodeError as json_err:
+                print(f"[ERROR] Failed to parse JSON for scene {index}: {json_err}")
+                
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    print(f"[RETRY] Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    print(f"[ERROR] Max retries reached for scene {index}. Giving up.")
+                    return None
+            
+        except Exception as e:
+            print(f"[ERROR] Error generating code for scene {index}: {e}")
+            
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt
+                print(f"[RETRY] Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+                continue
+            else:
+                print(f"[ERROR] Max retries reached for scene {index}. Giving up.")
+                return None
+    
+    # Should never reach here
+    return None
+
+
+def fix_manim_code(client, original_code, error_message, class_name, provider='openai', model='gpt-4o', max_fix_attempts=3):
+    """
+    REPL-style function to fix Manim code based on compilation errors.
+    Sends the error to the LLM and gets corrected code.
+    
+    Args:
+        client: LLM client (OpenAI or Anthropic)
+        original_code: The Python code that failed to compile
+        error_message: The error message from Manim compilation
+        class_name: The class name in the code
+        provider: 'openai' or 'claude'
+        model: Model name
+        max_fix_attempts: Maximum number of fix attempts
+        
+    Returns:
+        dict: {'content': fixed_code, 'class_name': class_name} or None if all attempts fail
+    """
+    
+    current_code = original_code
+    
+    for attempt in range(max_fix_attempts):
+        print(f"\n[REPL] Fixing code... (Attempt {attempt + 1}/{max_fix_attempts})")
+        
+        fix_prompt = f"""The following Manim code failed to compile with an error. Please fix the code.
+
+CURRENT CODE:
+```python
+{current_code}
+```
+
+ERROR MESSAGE:
+```
+{error_message}
+```
+
+IMPORTANT RULES:
+1. Fix ONLY the error mentioned - don't change working parts
+2. The class MUST inherit from Scene (not MovingCameraScene, not ThreeDScene)
+3. DO NOT use self.camera.frame (doesn't exist in Scene)
+4. ONLY use basic colors: WHITE, BLACK, RED, GREEN, BLUE, YELLOW, PURPLE, ORANGE, PINK, GRAY
+5. DO NOT use color variants like RED_A, RED_B, ORANGE_D, BLUE_E, etc.
+6. For custom colors, use hex codes: color="#FF5733"
+7. NEVER create empty Text or Paragraph objects
+8. Use only basic animations: Write, Create, FadeIn, FadeOut, Transform, ReplacementTransform
+
+RESPONSE FORMAT (JSON):
+{{
+  "content": "complete fixed Python code here",
+  "class_name": "{class_name}",
+  "fix_explanation": "brief explanation of what was fixed"
+}}
+
+Respond ONLY with valid JSON."""
+
+        try:
+            if provider == 'openai':
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": "You are an expert debugger for Manim Community Edition (v0.19.1). You fix Python code errors. Always respond in valid JSON format."},
+                        {"role": "user", "content": fix_prompt}
+                    ],
+                    max_completion_tokens=16000
+                )
+                
+                content = response.choices[0].message.content
+                if content is None:
+                    print(f"[REPL] Empty response from LLM")
+                    continue
+                    
+                response_text = content.strip()
+                
+            elif provider == 'claude':
+                response = client.messages.create(
+                    model=model,
+                    max_tokens=4000,
+                    system="You are an expert debugger for Manim Community Edition (v0.19.1). You fix Python code errors. Always respond in valid JSON format.",
+                    messages=[
+                        {"role": "user", "content": fix_prompt}
+                    ]
+                )
+                response_text = response.content[0].text.strip()
+            
+            elif provider == 'gemini':
+                # Gemini API call
+                response = client.models.generate_content(
+                    model=model,
+                    contents=fix_prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction="You are an expert debugger for Manim Community Edition (v0.19.1). You fix Python code errors. Always respond in valid JSON format.",
+                        response_mime_type="application/json"
+                    )
+                )
+                response_text = response.text.strip()
+            
+            else:
+                raise ValueError(f"Unknown provider: {provider}")
+            
+            if len(response_text) == 0:
+                print(f"[REPL] Empty response from LLM")
+                continue
+            
+            # Try to extract JSON if wrapped in markdown
+            if "```json" in response_text:
+                response_text = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL).group(1)
+            elif "```" in response_text:
+                response_text = re.search(r'```\s*(.*?)\s*```', response_text, re.DOTALL).group(1)
+            
+            # Parse JSON
+            result = json.loads(response_text)
+            
+            fix_explanation = result.get('fix_explanation', 'No explanation provided')
+            print(f"[REPL] Fix applied: {fix_explanation}")
+            
+            return {
+                'content': result.get('content', ''),
+                'class_name': result.get('class_name', class_name)
+            }
+            
+        except json.JSONDecodeError as json_err:
+            print(f"[REPL] Failed to parse fix response: {json_err}")
+            continue
+        except Exception as e:
+            print(f"[REPL] Error during fix attempt: {e}")
+            continue
+    
+    print(f"[REPL] Max fix attempts reached. Giving up.")
+    return None
+</file>
+
+<file path="src/tts_generator.py">
+import os
+import subprocess
+from pathlib import Path
+from openai import OpenAI
+
+
+def get_audio_duration(audio_path):
+    """
+    Gets the duration of an audio file using ffprobe
+    
+    Args:
+        audio_path: Path to the audio file
+    
+    Returns:
+        Duration in seconds (float) or None if error
+    """
+    try:
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            audio_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            duration = float(result.stdout.strip())
+            return duration
+        else:
+            print(f"  [WARNING] Could not get duration for {audio_path}")
+            return None
+    except Exception as e:
+        print(f"  [WARNING] Error getting audio duration: {e}")
+        return None
+
+
+def generate_audio_fragment(client, text, index, output_dir="media/audio_fragments", tts_model="tts-1", voice="alloy"):
+    """
+    Generates an audio fragment from text using OpenAI TTS
+    
+    Args:
+        client: OpenAI client instance
+        text: Text to convert to speech
+        index: Fragment index number
+        output_dir: Directory to save audio fragments
+        tts_model: TTS model to use (tts-1 or tts-1-hd)
+        voice: Voice to use (alloy, echo, fable, onyx, nova, shimmer)
+    
+    Returns:
+        Tuple of (audio_path, duration) or (None, None) if error
+    """
+    try:
+        # Create output directory if it doesn't exist
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Generate audio file path
+        audio_path = os.path.join(output_dir, f"fragment_{index}.mp3")
+        
+        print(f"  Generating audio fragment {index}...")
+        print(f"    Text preview: {text[:80]}...")
+        
+        # Call OpenAI TTS API
+        response = client.audio.speech.create(
+            model=tts_model,
+            voice=voice,
+            input=text
+        )
+        
+        # Save audio to file
+        response.stream_to_file(audio_path)
+        
+        # Get audio duration
+        duration = get_audio_duration(audio_path)
+        
+        if duration:
+            print(f"  [OK] Audio fragment saved: {audio_path} (duration: {duration:.2f}s)")
+        else:
+            print(f"  [OK] Audio fragment saved: {audio_path} (duration: unknown)")
+        
+        return audio_path, duration
+        
+    except Exception as e:
+        print(f"  [ERROR] Error generating audio fragment {index}: {e}")
+        return None, None
+
+
+def concatenate_audio_fragments(audio_paths, output_path="media/audio.mp3"):
+    """
+    Concatenates multiple audio fragments into a single MP3 file using ffmpeg
+    
+    Args:
+        audio_paths: List of paths to audio fragments
+        output_path: Path for the final concatenated audio file
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    if not audio_paths:
+        print("[ERROR] No audio fragments to concatenate")
+        return False
+    
+    # Create media folder if it doesn't exist
+    os.makedirs("media", exist_ok=True)
+    
+    # Create list file for ffmpeg
+    list_file = "media/audio_list.txt"
+    with open(list_file, 'w') as f:
+        for audio_path in audio_paths:
+            if os.path.exists(audio_path):
+                # Use absolute path to avoid issues
+                abs_path = os.path.abspath(audio_path)
+                f.write(f"file '{abs_path}'\n")
+    
+    try:
+        cmd = [
+            "ffmpeg", "-f", "concat", "-safe", "0",
+            "-i", list_file,
+            "-c", "copy",
+            output_path,
+            "-y"  # Overwrite if exists
+        ]
+        
+        print(f"\n  Concatenating {len(audio_paths)} audio fragments...")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            print(f"  [OK] Final audio created: {output_path}")
+            # Clean up temporary file
+            os.remove(list_file)
+            return True
+        else:
+            print(f"  [ERROR] Error concatenating audio:")
+            print(result.stderr)
+            return False
+            
+    except Exception as e:
+        print(f"  [ERROR] Error: {e}")
+        return False
+
+
+def generate_complete_audio(client, video_data, tts_model="tts-1", voice="alloy"):
+    """
+    Generates complete audio for all scenes
+    
+    Returns:
+        Tuple of (audio_path, durations_dict) where durations_dict maps scene index to duration
+    """
+    print(f"\n{'='*80}")
+    print(f"GENERATING AUDIO WITH TTS")
+    print(f"{'='*80}")
+    print(f"Model: {tts_model}")
+    print(f"Voice: {voice}")
+    print(f"Scenes: {len(video_data)}\n")
+    
+    audio_fragments = []
+    audio_durations = {}  # Map scene index to duration
+    
+    # Generate audio for each scene
+    for index, scene_data in enumerate(video_data, 1):
+        text = scene_data.get('text', '')
+        
+        if not text:
+            print(f"  [WARNING] Scene {index} has no text, skipping...")
+            continue
+        
+        audio_path, duration = generate_audio_fragment(
+            client=client,
+            text=text,
+            index=index,
+            tts_model=tts_model,
+            voice=voice
+        )
+        
+        if audio_path and os.path.exists(audio_path):
+            audio_fragments.append(audio_path)
+            if duration:
+                audio_durations[index] = duration
+        else:
+            print(f"  [WARNING] Could not generate audio for scene {index}")
+    
+    # Concatenate all audio fragments
+    if audio_fragments:
+        print(f"\n{'='*80}")
+        print(f"CONCATENATING {len(audio_fragments)} AUDIO FRAGMENTS")
+        print(f"{'='*80}")
+        
+        output_path = "media/audio.mp3"
+        success = concatenate_audio_fragments(audio_fragments, output_path)
+        
+        if success:
+            print(f"\n[OK] Complete audio generated: {output_path}\n")
+            return output_path, audio_durations
+        else:
+            print(f"\n[ERROR] Failed to concatenate audio fragments\n")
+            return None, {}
+    else:
+        print(f"\n[ERROR] No audio fragments were generated\n")
+        return None, {}
+</file>
+
+<file path="src/video_generator.py">
+import os
+import json
+import uuid
+import threading
+from datetime import datetime
+from pathlib import Path
+from dotenv import load_dotenv
+import openai
+import anthropic
+from google import genai
+from animations import generate_script_json
+from manim_generator import generate_manim_code, fix_manim_code
+from concat_video import compile_video, concatenate_videos, sanitize_filename, merge_video_and_audio
+from tts_generator import generate_complete_audio
+
+load_dotenv()
+
+# Global job storage (in production, use Redis or a database)
+jobs = {}
+
+def setup_llm_client(provider_preference='auto'):
+    """Sets up the LLM client based on preference and available API keys"""
+    
+    openai_api_key = os.getenv('OPENAI_API_KEY')
+    claude_api_key = os.getenv('CLAUDE_API_KEY')
+    gemini_api_key = os.getenv('GEMINI_API_KEY') or os.getenv('GOOGLE_API_KEY')
+    
+    openai_model = os.getenv("OPENAI_MODEL", "gpt-5-nano")
+    claude_model = os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-20241022")
+    
+    # Map choice to exact model ID
+    gemini_model = "gemini-3.5-flash"  # Default
+    if provider_preference == 'gemini-lite':
+        gemini_model = "gemini-3.1-flash-lite"
+    elif provider_preference == 'gemini-flash':
+        gemini_model = "gemini-3.5-flash"
+    elif provider_preference == 'gemini-pro':
+        gemini_model = "gemini-3.1-pro"
+        
+    # If specific provider requested
+    if provider_preference in ['gemini-lite', 'gemini-flash', 'gemini-pro'] and gemini_api_key:
+        client = genai.Client(api_key=gemini_api_key)
+        return {
+            'client': client,
+            'provider': 'gemini',
+            'model': gemini_model
+        }
+        
+    if provider_preference == 'claude' and claude_api_key:
+        client = anthropic.Anthropic(api_key=claude_api_key)
+        return {
+            'client': client,
+            'provider': 'claude',
+            'model': claude_model
+        }
+    
+    if provider_preference == 'openai' and openai_api_key:
+        client = openai.OpenAI(api_key=openai_api_key)
+        return {
+            'client': client,
+            'provider': 'openai',
+            'model': openai_model
+        }
+    
+    # Auto mode: Priority 1 Gemini, Priority 2 Claude, Priority 3 OpenAI
+    if gemini_api_key:
+        client = genai.Client(api_key=gemini_api_key)
+        return {
+            'client': client,
+            'provider': 'gemini',
+            'model': 'gemini-3.5-flash'
+        }
+        
+    if claude_api_key:
+        client = anthropic.Anthropic(api_key=claude_api_key)
+        return {
+            'client': client,
+            'provider': 'claude',
+            'model': claude_model
+        }
+    
+    if openai_api_key:
+        client = openai.OpenAI(api_key=openai_api_key)
+        return {
+            'client': client,
+            'provider': 'openai',
+            'model': openai_model
+        }
+    
+    raise ValueError(
+        "No API key found! Please configure GEMINI_API_KEY, CLAUDE_API_KEY, or OPENAI_API_KEY in your .env file"
+    )
+
+
+def update_job_status(job_id, status=None, progress=None, current_step=None, message=None, error=None, video_url=None):
+    """Update job status in storage"""
+    if job_id not in jobs:
+        jobs[job_id] = {}
+    
+    if status:
+        jobs[job_id]['status'] = status
+    if progress is not None:
+        jobs[job_id]['progress'] = progress
+    if current_step:
+        jobs[job_id]['current_step'] = current_step
+    if message:
+        jobs[job_id]['message'] = message
+    if error:
+        jobs[job_id]['error'] = error
+    if video_url:
+        jobs[job_id]['video_url'] = video_url
+    
+    jobs[job_id]['updated_at'] = datetime.now().isoformat()
+
+
+def generate_video_workflow(job_id, topic, enable_tts, llm_provider):
+    """Background worker for video generation"""
+    
+    try:
+        # Create necessary directories (at project root level)
+        project_root = Path(__file__).parent.parent
+        content_dir = project_root / "content"
+        media_dir = project_root / "media"
+        os.makedirs(content_dir, exist_ok=True)
+        os.makedirs(media_dir, exist_ok=True)
+        
+        # Step 1: Setup LLM
+        update_job_status(job_id, status='running', progress=5, current_step='script', 
+                         message='Setting up LLM client...')
+        
+        llm_config = setup_llm_client(llm_provider)
+        client = llm_config['client']
+        provider = llm_config['provider']
+        model = llm_config['model']
+        
+        # Step 2: Generate Script
+        update_job_status(job_id, progress=10, current_step='script', 
+                         message=f'Generating script with {provider}...')
+        
+        json_file = str(content_dir / f"video-output-{job_id}.json")
+        video_data = generate_script_json(client, topic, json_file, provider, model)
+        
+        if not video_data:
+            raise Exception("Could not generate script")
+        
+        update_job_status(job_id, progress=25, current_step='script', 
+                         message=f'Script generated with {len(video_data)} scenes')
+        
+        # Step 3: Generate TTS Audio (if enabled)
+        audio_path = None
+        audio_durations = {}
+        
+        if enable_tts:
+            update_job_status(job_id, progress=30, current_step='tts', 
+                             message='Generating audio with TTS...')
+            
+            openai_api_key = os.getenv('OPENAI_API_KEY')
+            if openai_api_key:
+                tts_client = openai.OpenAI(api_key=openai_api_key)
+                tts_model = os.getenv("TTS_MODEL", "tts-1")
+                voice = os.getenv("VOICE", "alloy")
+                
+                audio_path, audio_durations = generate_complete_audio(
+                    client=tts_client,
+                    video_data=video_data,
+                    tts_model=tts_model,
+                    voice=voice
+                )
+                
+                update_job_status(job_id, progress=40, current_step='tts', 
+                                 message='Audio generated successfully')
+            else:
+                update_job_status(job_id, progress=40, current_step='tts', 
+                                 message='Skipping TTS (no OpenAI key)')
+        else:
+            update_job_status(job_id, progress=40, current_step='code', 
+                             message='Skipping TTS (disabled)')
+        
+        # Step 4: Generate Manim Code and Compile Videos
+        update_job_status(job_id, progress=45, current_step='code', 
+                         message='Generating Manim code...')
+        
+        topic_slug = sanitize_filename(topic.lower().replace(" ", "_"))
+        generated_videos = []
+        previous_context = None
+        
+        for index, scene_data in enumerate(video_data, 1):
+            scene_progress = 45 + (index / len(video_data)) * 30  # 45% to 75%
+            
+            update_job_status(job_id, progress=scene_progress, current_step='code', 
+                             message=f'Processing scene {index}/{len(video_data)}...')
+            
+            text = scene_data.get('text', '')
+            animation = scene_data.get('animation', '')
+            audio_duration = audio_durations.get(index, None)
+            
+            manim_code = generate_manim_code(
+                client, text, animation, index, 
+                previous_context, provider, model, 
+                audio_duration=audio_duration
+            )
+            
+            if not manim_code:
+                continue
+            
+            code_content = manim_code.get('content', '')
+            class_name = manim_code.get('class_name', f'Scene{index}')
+            
+            filename = f"{topic_slug}-{job_id}-{index}.py"
+            filepath = str(content_dir / filename)
+            
+            # REPL Loop: Try to compile, if error -> fix -> retry
+            max_repl_iterations = 3
+            current_code = code_content
+            current_class_name = class_name
+            video_path = None
+            
+            for repl_iteration in range(max_repl_iterations):
+                # Write current code to file
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    f.write(current_code)
+                
+                # Try to compile
+                video_path, compile_error = compile_video(filepath, current_class_name, topic_slug, index)
+                
+                if video_path and os.path.exists(video_path):
+                    # Success! Exit the REPL loop
+                    print(f"[REPL] Scene {index} compiled successfully on iteration {repl_iteration + 1}")
+                    break
+                
+                if compile_error and repl_iteration < max_repl_iterations - 1:
+                    # Error occurred, try to fix with LLM
+                    update_job_status(job_id, progress=scene_progress, current_step='code', 
+                                     message=f'Fixing scene {index} (attempt {repl_iteration + 2}/{max_repl_iterations})...')
+                    
+                    fixed_code = fix_manim_code(
+                        client=client,
+                        original_code=current_code,
+                        error_message=compile_error,
+                        class_name=current_class_name,
+                        provider=provider,
+                        model=model
+                    )
+                    
+                    if fixed_code:
+                        current_code = fixed_code.get('content', '')
+                        current_class_name = fixed_code.get('class_name', current_class_name)
+                    else:
+                        # LLM couldn't fix it, break out of REPL loop
+                        print(f"[REPL] Could not fix scene {index}, skipping")
+                        break
+                else:
+                    # No error message or max iterations reached
+                    break
+            
+            if video_path and os.path.exists(video_path):
+                generated_videos.append(video_path)
+                previous_context = {
+                    'text': text,
+                    'animation': animation,
+                    'code': current_code  # Use the final (possibly fixed) code
+                }
+        
+        if not generated_videos:
+            raise Exception("No videos were generated")
+        
+        # Step 5: Concatenate Videos
+        update_job_status(job_id, progress=80, current_step='video', 
+                         message='Concatenating video scenes...')
+        
+        silent_video_path = str(media_dir / f"output_silent_{job_id}.mp4")
+        success = concatenate_videos(generated_videos, silent_video_path)
+        
+        if not success:
+            raise Exception("Failed to concatenate videos")
+        
+        # Step 6: Merge Audio (if available)
+        final_output_path = str(media_dir / f"output_{job_id}.mp4")
+        
+        if audio_path and os.path.exists(audio_path):
+            update_job_status(job_id, progress=90, current_step='video', 
+                             message='Merging audio with video...')
+            
+            merge_success = merge_video_and_audio(
+                video_path=silent_video_path,
+                audio_path=audio_path,
+                output_path=final_output_path
+            )
+            
+            if not merge_success:
+                # If merge fails, use silent video
+                final_output_path = silent_video_path
+        else:
+            # No audio, use silent video
+            os.rename(silent_video_path, final_output_path)
+        
+        # Complete!
+        video_url = f"/media/{os.path.basename(final_output_path)}"
+        update_job_status(job_id, status='completed', progress=100, current_step='video', 
+                         message='Video generation completed!', video_url=video_url)
+        
+        # Cleanup
+        if os.path.exists(json_file):
+            os.remove(json_file)
+        
+    except Exception as e:
+        update_job_status(job_id, status='failed', error=str(e), 
+                         message=f'Error: {str(e)}')
+
+
+def start_video_generation(topic, enable_tts=True, llm_provider='auto'):
+    """Start video generation in background thread"""
+    
+    job_id = str(uuid.uuid4())
+    
+    # Initialize job
+    jobs[job_id] = {
+        'job_id': job_id,
+        'topic': topic,
+        'status': 'queued',
+        'progress': 0,
+        'current_step': 'script',
+        'message': 'Job queued',
+        'created_at': datetime.now().isoformat(),
+        'updated_at': datetime.now().isoformat()
+    }
+    
+    # Start background thread
+    thread = threading.Thread(
+        target=generate_video_workflow,
+        args=(job_id, topic, enable_tts, llm_provider),
+        daemon=True
+    )
+    thread.start()
+    
+    return job_id
+
+
+def get_job_status(job_id):
+    """Get current status of a job"""
+    return jobs.get(job_id)
+</file>
+
+<file path=".dockerignore">
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+.venv
+venv/
+ENV/
+
+# Media files (will be mounted as volume)
+media/*
+
+# Environment variables
+.env
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation
+README.md
+*.md
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+</file>
+
+<file path=".env.example">
+# API Keys - Configure at least one
+# Priority 1: Claude (if available, will be used first in auto mode)
+CLAUDE_API_KEY=
+
+# Priority 2: OpenAI (fallback if Claude is not configured, required for TTS)
+OPENAI_API_KEY=
+
+# Model Configuration
+CLAUDE_MODEL=claude-sonnet-4-5
+OPENAI_MODEL=gpt-4.1
+
+# TTS Configuration (requires OpenAI API key)
+TTS_MODEL=tts-1
+VOICE=alloy
+</file>
+
+<file path=".gitignore">
+# Environment
+.env
+
+# Virtual environments
+.venv
+venv
+env
+uv.lock
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+
+# Project specific
+media
+content
+video-output.json
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+</file>
+
+<file path="docker-compose.yml">
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: prompt2learn-ai
+    ports:
+      - "5000:5000"
+    volumes:
+      # Mount the media directory to persist generated videos
+      - ./media:/app/media
+      # Mount the public directory
+      - ./public:/app/public
+      # Optional: mount .env file for environment variables
+      - ./.env:/app/.env
+    environment:
+      - FLASK_APP=main.py
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    networks:
+      - prompt2learn-network
+
+networks:
+  prompt2learn-network:
+    driver: bridge
+</file>
+
+<file path="Dockerfile">
+# Use Python 3.11 slim as base image
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies for Manim
+RUN apt-get update && apt-get install -y \
+    libcairo2-dev \
+    ffmpeg \
+    texlive \
+    texlive-latex-extra \
+    texlive-fonts-extra \
+    texlive-latex-recommended \
+    texlive-science \
+    tipa \
+    libpango1.0-dev \
+    pkg-config \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
+# Copy dependency files
+COPY pyproject.toml .
+COPY requirements.txt .
+
+# Install Python dependencies using uv
+RUN uv pip install --system -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Create necessary directories
+RUN mkdir -p media public
+
+# Expose port 5000
+EXPOSE 5000
+
+# Set environment variables
+ENV FLASK_APP=src/main.py
+ENV PYTHONUNBUFFERED=1
+
+# Run the application
+CMD ["python", "src/main.py"]
+</file>
+
+<file path="pyproject.toml">
+[project]
+name = "prompt2learn-ai"
+version = "0.1.0"
+description = "Automatic educational video generator using AI and Manim"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Mateo Lafalce", email = "mateolafalce@gmail.com" }
+]
+keywords = ["manim", "ai", "video-generation", "education", "animation"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Education",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "openai>=1.0.0",
+    "python-dotenv>=1.0.0",
+    "anthropic>=0.18.0",
+    "manim>=0.18.0",
+    "flask>=3.0.0",
+    "flask-cors>=4.0.0",
+    "google-genai>=0.1.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=24.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/mateolafalce/prompt2learn.ai"
+Repository = "https://github.com/mateolafalce/prompt2learn.ai"
+Issues = "https://github.com/mateolafalce/prompt2learn.ai/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[dependency-groups]
+dev = []
+
+[tool.black]
+line-length = 100
+target-version = ['py39', 'py310', 'py311', 'py312']
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+</file>
+
+<file path="README.md">
+<div align="center">
+
+<img width="489" height="162" alt="image" src="https://github.com/user-attachments/assets/8a61c5a0-d1e6-4de5-a261-6897c18c2830" />
+
+
+
+# Prompt2Learn.ai
+
+</div>
+
+Automatic educational video generator using AI and Manim. Converts any topic into a professional animated video with narration and mathematical visualizations.
+
+<div align="center">
+  
+## User Interface
+
+![video](./public/output6.gif)
+
+</div>
+
+<div align="center">
+  
+## Examples
+
+</div>
+
+> propmt: How do machines learn to recognize MNIST dataset numbers?
+> 
+> model: claude-sonnet-4-5-20250929
+> 
+> response:
+
+<div align="center">
+
+![video](./public/output5.gif)
+
+</div>
+
+> propmt: What is a Markov chain and how are they related to LLMs?
+> 
+> model: claude-sonnet-4-5-20250929
+> 
+> response:
+
+<div align="center">
+
+![video](./public/output4.gif)
+
+</div>
+
+> propmt: How does Cramer's rule work for system of linear equations?
+> 
+> model: claude-sonnet-4-5-20250929
+> 
+> response:
+
+<div align="center">
+
+![video](./public/output3.gif)
+
+</div>
+
+> propmt: how chat gpt works?
+> 
+> model: gpt-5.2
+> 
+> response:
+
+<div align="center">
+
+![video](./public/output.gif)
+
+</div>
+
+> propmt: how tokenization works in chat gpt?
+> 
+> model: gpt-5.2
+> 
+> response:
+
+<div align="center">
+
+![video](./public/output2.gif)
+
+</div>
+
+## Features
+
+- **Multi-LLM Support** with automatic fallback (OpenAI GPT, Claude)
+- **Automatic script generation** using advanced language models
+- **Educational animations** with Manim Community Edition
+- **Multi-language support** (automatically detects topic language)
+- **Optimized videos** of ~60 seconds with multiple scenes
+- **Automatic concatenation** of fragments into final video
+
+## Architecture
+
+### System Overview
+
+Prompt2Learn.ai is a multi-agent system that orchestrates several specialized components to transform a topic into an educational video. The system follows a pipeline architecture where each agent has a specific responsibility.
+
+```mermaid
+graph TB
+    subgraph Input
+        A[User Topic]
+    end
+    
+    subgraph "LLM Configuration"
+        B[setup_llm_client]
+        B1[Claude API]
+        B2[OpenAI API]
+        B -->|Priority 1| B1
+        B -->|Fallback| B2
+    end
+    
+    subgraph "Agent 1: Script Generation"
+        C[animations.py]
+        C1[generate_script_json]
+        C --> C1
+    end
+    
+    subgraph "Agent 2: TTS Generation"
+        D[tts_generator.py]
+        D1[generate_complete_audio]
+        D2[generate_audio_fragment]
+        D3[concatenate_audio_fragments]
+        D1 --> D2
+        D2 --> D3
+    end
+    
+    subgraph "Agent 3: Manim Code Generation"
+        E[manim_generator.py]
+        E1[generate_manim_code]
+        E --> E1
+    end
+    
+    subgraph "Agent 4: Video Compilation"
+        F[concat_video.py]
+        F1[compile_video]
+        F2[concatenate_videos]
+        F3[merge_video_and_audio]
+        F1 --> F2
+        F2 --> F3
+    end
+    
+    subgraph Output
+        G[Final Video with Audio]
+    end
+    
+    A --> B
+    B --> C1
+    C1 -->|video-output.json| D1
+    C1 -->|video-output.json| E1
+    D1 -->|audio durations| E1
+    E1 -->|.py files| F1
+    F1 -->|.mp4 fragments| F2
+    D3 -->|audio.mp3| F3
+    F2 -->|output_silent.mp4| F3
+    F3 --> G
+    
+    style A fill:#e1f5ff
+    style G fill:#c8e6c9
+    style C fill:#fff9c4
+    style D fill:#ffe0b2
+    style E fill:#f8bbd0
+    style F fill:#d1c4e9
+```
+
+## Installation
+
+First, install uv (if you haven't already):
+
+```bash
+# On macOS and Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Or using pip
+pip install uv
+```
+
+### Setup
+
+```bash
+git clone https://github.com/mateolafalce/prompt2learn.ai.git
+cd prompt2learn.ai
+
+# Create virtual environment and install all dependencies
+uv sync
+
+# Activate the virtual environment
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+cp .env.example .env
+```
+
+## Usage
+
+Start the Flask server:
+
+```bash
+python src/main.py
+```
+
+Then open your browser and navigate to:
+```
+http://localhost:5000
+```
+
+or 
+
+```bash
+docker compose up
+```
+</file>
+
+</files>

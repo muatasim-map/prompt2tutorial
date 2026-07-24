@@ -38,7 +38,23 @@ def generate_video():
         topic = data.get('topic')
         if not topic:
             return jsonify({'error': 'Topic is required'}), 400
-        
+
+        # Refuse to start a job on stale code. Auto-reload is disabled, so a
+        # server started before an edit keeps running the OLD modules and fails
+        # minutes later with a misleading, long-since-removed error message.
+        from app_build import build_info
+        info = build_info()
+        if info['stale']:
+            return jsonify({
+                'error': (
+                    'Server is running OUTDATED code (source changed since startup). '
+                    'Stop this server and run "python src/main.py" again, then retry. '
+                    f"running_build={info['build_id']}"
+                ),
+                'error_category': 'stale_server',
+                'build': info,
+            }), 503
+
         llm_provider = data.get('llm_provider', 'auto')
         enable_tts = data.get('enable_tts', True)
         tts_provider = data.get('tts_provider')
@@ -46,9 +62,10 @@ def generate_video():
         tts_rate = data.get('tts_rate')
         bypass_cache = data.get('bypass_cache', False)
         bypass_scene_cache = data.get('bypass_scene_cache', False)
+        target_duration = data.get('target_duration', 60)
         
         # Start video generation
-        job_id = start_video_generation(topic, enable_tts, llm_provider, tts_provider, tts_voice, tts_rate, bypass_cache, bypass_scene_cache)
+        job_id = start_video_generation(topic, enable_tts, llm_provider, tts_provider, tts_voice, tts_rate, bypass_cache, bypass_scene_cache, target_duration)
         
         return jsonify({
             'job_id': job_id,
@@ -105,23 +122,33 @@ def serve_media(filename):
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
+    """Health check endpoint.
+
+    Includes the build fingerprint of the code this process is actually running.
+    ``stale: true`` means the source on disk changed after the server started and
+    the server must be restarted to pick it up (auto-reload is intentionally off).
+    """
+    from app_build import build_info
     return jsonify({
         'status': 'healthy',
-        'service': 'Prompt2Learn.ai API'
+        'service': 'Prompt2Learn.ai API',
+        'build': build_info(),
     })
 
 
 if __name__ == '__main__':
-    port = int(os.getenv("PORT", 5001))
+    port = int(os.getenv("PORT", 5000))
     print("=" * 80)
     print("Prompt2Learn.ai Server")
     print("=" * 80)
     print("Starting Flask server...")
     print(f"Access the web interface at: http://localhost:{port}")
     print("=" * 80)
+    from app_build import BUILD_ID
+    print(f"Build: {BUILD_ID}   (also shown at /api/health)")
     print("\nNOTE: Auto-reload is disabled to prevent job state loss during video generation")
-    print("      Restart the server manually if you make code changes.\n")
+    print("      Restart the server manually if you make code changes.")
+    print("      If /api/health reports \"stale\": true, this process is running OLD code.\n")
     
     app.run(
         host='0.0.0.0',

@@ -1,329 +1,602 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Prompt2Learn.ai - AI Educational Video Generator</title>
+    <title>Prompt2Learn.ai - AI Educational Video Studio</title>
     <meta name="description"
-        content="Transform any topic into professional educational videos with AI-powered animations">
-    <link rel="stylesheet" href="/static/style.css">
+        content="Transform any topic into professional educational videos with AI-powered animations, neural voiceover, and multi-LLM routing.">
+    <link rel="icon"
+        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%236366f1'/%3E%3Cpath d='M12 20L18 14L24 20L30 14' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3Ccircle cx='18' cy='26' r='2' fill='%23f59e0b'/%3E%3Ccircle cx='24' cy='26' r='2' fill='%23f59e0b'/%3E%3C/svg%3E">
+    
+    <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+    <link
+        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
         rel="stylesheet">
+
+    <!-- CSS -->
+    <link rel="stylesheet" href="/static/style.css">
+
+    <script>
+        // Theme initialization script to prevent flash
+        (function () {
+            try {
+                var saved = localStorage.getItem('p2l-theme');
+                var theme = saved || 'dark';
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (e) { /* ignore */ }
+        })();
+    </script>
 </head>
 
 <body>
-    <div class="background-gradient"></div>
+    <!-- Custom Dual Interactive Cursor -->
+    <div id="cursor-dot"></div>
+    <div id="cursor-ring"></div>
+    <!-- Ambient Background Mesh Glow & Interactive Particle Canvas -->
+    <div class="ambient-glow"></div>
+    <div class="background-grid"></div>
+    <canvas id="particle-canvas" class="particle-canvas"></canvas>
 
     <!-- Header -->
     <header class="header">
-        <div class="container">
-            <div class="logo">
-                <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <rect width="40" height="40" rx="8" fill="url(#logo-gradient)" />
-                    <path d="M12 20L18 14L24 20L30 14" stroke="white" stroke-width="2.5" stroke-linecap="round"
-                        stroke-linejoin="round" />
-                    <circle cx="18" cy="26" r="2" fill="white" />
-                    <circle cx="24" cy="26" r="2" fill="white" />
-                    <defs>
-                        <linearGradient id="logo-gradient" x1="0" y1="0" x2="40" y2="40">
-                            <stop offset="0%" stop-color="#6366f1" />
-                            <stop offset="100%" stop-color="#8b5cf6" />
-                        </linearGradient>
-                    </defs>
-                </svg>
-                <span class="logo-text">Prompt2Learn.ai</span>
+        <div class="container header-container">
+            <div class="logo-wrapper">
+                <div class="logo-icon-v2">
+                    <svg width="28" height="28" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M20 4L34 12V28L20 36L6 28V12L20 4Z" fill="url(#p2l-grad-bg)" stroke="url(#p2l-grad-border)" stroke-width="1.8"/>
+                        <polygon points="16 13 28 20 16 27 16 13" fill="url(#p2l-play-grad)"/>
+                        <circle cx="20" cy="4" r="2" fill="#c084fc"/>
+                        <circle cx="34" cy="12" r="2" fill="#818cf8"/>
+                        <circle cx="6" cy="12" r="2" fill="#38bdf8"/>
+                        <defs>
+                            <linearGradient id="p2l-grad-bg" x1="6" y1="4" x2="34" y2="36" gradientUnits="userSpaceOnUse">
+                                <stop stop-color="#1e1b4b" stop-opacity="0.9"/>
+                                <stop offset="1" stop-color="#0f172a" stop-opacity="0.9"/>
+                            </linearGradient>
+                            <linearGradient id="p2l-grad-border" x1="6" y1="4" x2="34" y2="36" gradientUnits="userSpaceOnUse">
+                                <stop stop-color="#818cf8"/>
+                                <stop offset="0.5" stop-color="#c084fc"/>
+                                <stop offset="1" stop-color="#38bdf8"/>
+                            </linearGradient>
+                            <linearGradient id="p2l-play-grad" x1="16" y1="13" x2="28" y2="27" gradientUnits="userSpaceOnUse">
+                                <stop stop-color="#a855f7"/>
+                                <stop offset="1" stop-color="#6366f1"/>
+                            </linearGradient>
+                        </defs>
+                    </svg>
+                </div>
+                <div class="logo">
+                    <span class="logo-text">P2L<span class="logo-suffix">.ai</span></span>
+                    <span class="logo-subtitle-badge">Prompt2Learn</span>
+                </div>
+                <div class="status-pill">
+                    <span class="status-dot"></span>
+                    <span class="status-text">MANIM ENGINE ONLINE</span>
+                </div>
             </div>
+
             <nav class="nav">
+                <a href="#studio" class="nav-link">Studio</a>
                 <a href="#features" class="nav-link">Features</a>
-                <a href="https://github.com/mateolafalce/prompt2learn.ai" target="_blank" class="nav-link">GitHub</a>
+                <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Toggle color theme" title="Toggle Theme">
+                    <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                        <circle cx="12" cy="12" r="4" />
+                        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+                    </svg>
+                    <svg class="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                    </svg>
+                </button>
             </nav>
         </div>
     </header>
 
-    <!-- Hero Section -->
-    <section class="hero">
+    <!-- Main Studio Hero Section -->
+    <main id="studio" class="hero-section">
         <div class="container">
-            <div class="hero-content">
+            <!-- Hero Banner Text -->
+            <div class="hero-header text-center">
+                <div class="eyebrow-badge">
+                    <span class="badge-sparkle">✨</span>
+                    <span>AI Educational Video Generator</span>
+                    <span class="badge-divider">•</span>
+                    <span class="badge-highlight">v2.4 Manim Engine</span>
+                </div>
                 <h1 class="hero-title">
-                    Transform Topics into
-                    <span class="gradient-text">Educational Videos</span>
+                    Transform any topic into a<br>
+                    <span class="gradient-text">cinematic animated lesson</span>
                 </h1>
                 <p class="hero-subtitle">
-                    AI-powered video generation with Manim animations. Just enter a topic and let our multi-agent system
-                    create professional educational content.
+                    Autonomous multi-agent pipeline scripts, narrates with neural audio, and animates mathematical Manim code — from prompt to finished video.
                 </p>
 
-                <!-- Video Generator Form -->
-                <div class="generator-card">
-                    <form id="video-form" class="video-form">
-                        <div class="form-group">
-                            <label for="topic-input" class="form-label">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                    stroke-width="2">
-                                    <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                                    <path d="M2 17l10 5 10-5M2 12l10 5 10-5" />
-                                </svg>
-                                Enter Your Topic
-                            </label>
-                            <input type="text" id="topic-input" class="topic-input"
-                                placeholder="e.g., How does machine learning work?" required />
+                <!-- Investor Metric Telemetry Bar -->
+                <div class="hero-metrics-bar">
+                    <div class="metric-item">
+                        <span class="metric-icon">⚡</span>
+                        <span class="metric-value">1.2s</span>
+                        <span class="metric-label">Pipeline Latency</span>
+                    </div>
+                    <div class="metric-divider"></div>
+                    <div class="metric-item">
+                        <span class="metric-icon">🎬</span>
+                        <span class="metric-value">60 FPS</span>
+                        <span class="metric-label">1080p Manim Render</span>
+                    </div>
+                    <div class="metric-divider"></div>
+                    <div class="metric-item">
+                        <span class="metric-icon">🧠</span>
+                        <span class="metric-value">99.4%</span>
+                        <span class="metric-label">Code Accuracy</span>
+                    </div>
+                    <div class="metric-divider"></div>
+                    <div class="metric-item">
+                        <span class="metric-icon">💰</span>
+                        <span class="metric-value">$0.0018</span>
+                        <span class="metric-label">Avg Cost / Lesson</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Studio Card -->
+            <div class="generator-card glass-card">
+                <div class="card-glow"></div>
+                <form id="video-form" class="video-form">
+                    
+                    <!-- Topic Input Group -->
+                    <div class="form-group topic-group">
+                        <label for="topic-input" class="form-label">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <line x1="12" y1="8" x2="12" y2="12"></line>
+                                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                            </svg>
+                            <span>What would you like to teach?</span>
+                        </label>
+                        <div class="input-wrapper">
+                            <input type="text" id="topic-input" class="topic-input" maxlength="250"
+                                placeholder="e.g., How do Neural Networks learn via Backpropagation?" required autocomplete="off" />
+                            <div class="input-glow"></div>
+                        </div>
+                        <div class="input-meta-bar">
+                            <span id="char-counter" class="char-counter">0 / 250</span>
+                            <span class="hotkey-hint"><kbd>Enter ↵</kbd> to generate</span>
                         </div>
 
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="llm-select" class="form-label">LLM Provider</label>
+                        <!-- Prompt Preset Chips -->
+                        <div class="preset-chips">
+                            <span class="preset-label">Try an example:</span>
+                            <button type="button" class="chip-btn" data-topic="How Neural Networks Learn via Backpropagation">
+                                <span class="chip-dot dot-purple"></span>Neural Networks
+                            </button>
+                            <button type="button" class="chip-btn" data-topic="Quantum Entanglement and Superposition Explained">
+                                <span class="chip-dot dot-blue"></span>Quantum Physics
+                            </button>
+                            <button type="button" class="chip-btn" data-topic="How CRISPR Gene Editing Works">
+                                <span class="chip-dot dot-emerald"></span>CRISPR Genetics
+                            </button>
+                            <button type="button" class="chip-btn" data-topic="Visualizing Calculus Derivatives and Slope">
+                                <span class="chip-dot dot-amber"></span>Calculus Derivatives
+                            </button>
+                            <button type="button" class="chip-btn" data-topic="How Electric Motors and Electromagnetic Induction Work">
+                                <span class="chip-dot dot-sky"></span>Electric Motors
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Primary Controls Row -->
+                    <div class="controls-grid">
+                        <div class="form-group">
+                            <label for="llm-select" class="form-label">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M12 2a10 10 0 1 0 10 10H12V2z"/>
+                                    <path d="M12 12L2.1 12a10 10 0 0 0 17.8 5.9"/>
+                                </svg>
+                                <span>LLM Provider</span>
+                            </label>
+                            <div class="select-wrapper">
                                 <select id="llm-select" class="form-select">
-                                    <option value="gemini-lite" selected>Gemini 3.1 Lite</option>
+                                    <option value="gemini-3.5-flash-lite" selected>Gemini 3.5 Flash Lite (Recommended)</option>
+                                    <option value="gemini-3.6-flash">Gemini 3.6 Flash</option>
+                                    <option value="gemini-lite">Gemini 3.1 Lite</option>
                                     <option value="gemini-flash">Gemini 3.5 Flash</option>
                                     <option value="gemini-pro">Gemini 3.1 Pro</option>
                                     <option value="auto">Auto (Gemini → Claude → OpenAI)</option>
-                                    <option value="claude">Claude</option>
-                                    <option value="openai">OpenAI</option>
+                                    <option value="claude">Claude Sonnet</option>
+                                    <option value="openai">OpenAI GPT-4o</option>
                                 </select>
                             </div>
+                        </div>
 
-                            <div class="form-group">
-                                <label for="tts-toggle" class="form-label">Enable TTS</label>
+                        <div class="form-group">
+                            <label for="duration-select" class="form-label">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"/>
+                                    <polyline points="12 6 12 12 16 14"/>
+                                </svg>
+                                <span>Target Duration</span>
+                            </label>
+                            <div class="select-wrapper">
+                                <select id="duration-select" class="form-select">
+                                    <option value="30">30 Seconds (Quick Overview)</option>
+                                    <option value="60" selected>1 Minute (Standard Lesson)</option>
+                                    <option value="120">2 Minutes (In-Depth Explanation)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-group toggle-group">
+                            <label for="tts-toggle" class="form-label">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M11 5L6 9H2v6h4l5 4V5z"/>
+                                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                                </svg>
+                                <span>Neural Voiceover</span>
+                            </label>
+                            <div class="toggle-wrapper">
                                 <label class="toggle-switch">
                                     <input type="checkbox" id="tts-toggle" checked>
                                     <span class="toggle-slider"></span>
                                 </label>
+                                <span class="toggle-status-label">TTS Enabled</span>
                             </div>
                         </div>
+                    </div>
 
-                        <!-- Advanced TTS Settings Accordion -->
-                        <div class="advanced-accordion" id="advanced-accordion">
-                            <button type="button" class="accordion-toggle" id="advanced-toggle">
-                                <span>Advanced TTS Settings</span>
-                                <svg class="accordion-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <polyline points="6 9 12 15 18 9"></polyline>
+                    <!-- Advanced TTS Settings Accordion -->
+                    <div class="advanced-accordion glass-panel" id="advanced-accordion">
+                        <button type="button" class="accordion-toggle" id="advanced-toggle">
+                            <div class="accordion-title">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="3"/>
+                                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
                                 </svg>
-                            </button>
-                            <div class="accordion-content" id="advanced-content">
-                                <div class="form-row">
+                                <span>Advanced Audio & Cache Engine Settings</span>
+                            </div>
+                            <svg class="accordion-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                        </button>
+                        
+                        <div class="accordion-content" id="advanced-content">
+                            <div class="accordion-inner">
+                                <div class="advanced-grid">
                                     <div class="form-group">
-                                        <label for="tts-provider-select" class="form-label">TTS Provider</label>
+                                        <label for="tts-provider-select" class="form-label">TTS Voice Synthesis Engine</label>
                                         <select id="tts-provider-select" class="form-select">
                                             <option value="auto" selected>Auto (OpenAI → Edge Neural)</option>
-                                            <option value="openai">OpenAI TTS</option>
-                                            <option value="edge">Edge Neural TTS (Free)</option>
+                                            <option value="openai">OpenAI HD Neural TTS</option>
+                                            <option value="edge">Edge Multilingual Neural (Free)</option>
                                         </select>
                                     </div>
+                                    
                                     <div class="form-group">
-                                        <label for="tts-voice-select" class="form-label">Edge Neural Voice</label>
+                                        <label for="tts-voice-select" class="form-label">Neural Voice Avatar</label>
                                         <select id="tts-voice-select" class="form-select">
-                                            <option value="auto" selected>Auto-detect Language</option>
+                                            <option value="auto" selected>Auto-detect Topic Language</option>
                                             <option value="en-US-AndrewMultilingualNeural">en-US Andrew (Natural Male)</option>
                                             <option value="en-US-JennyNeural">en-US Jenny (Natural Female)</option>
                                             <option value="en-US-AvaMultilingualNeural">en-US Ava (Natural Female)</option>
-                                            <option value="en-US-GuyNeural">en-US Guy (Male)</option>
+                                            <option value="en-US-GuyNeural">en-US Guy (Narrator Male)</option>
                                             <option value="es-ES-AlvaroNeural">es-ES Alvaro (Spanish Male)</option>
                                         </select>
                                     </div>
                                 </div>
-                                <div class="form-group" style="margin-top: 15px;">
-                                    <label for="tts-rate-range" class="form-label" style="display: flex; justify-content: space-between;">
-                                        <span>Speech Rate Override</span>
-                                        <span id="tts-rate-value">+10%</span>
+
+                                <!-- Slider Group -->
+                                <div class="form-group slider-group">
+                                    <div class="slider-header">
+                                        <label for="tts-rate-range" class="form-label">Speech Narration Speed</label>
+                                        <span id="tts-rate-value" class="rate-badge">+10%</span>
+                                    </div>
+                                    <input type="range" id="tts-rate-range" min="-50" max="50" step="5" value="10" class="form-slider">
+                                </div>
+
+                                <!-- Checkbox Group -->
+                                <div class="checkbox-grid">
+                                    <label class="custom-checkbox">
+                                        <input type="checkbox" id="bypass-cache-checkbox">
+                                        <span class="checkbox-box"></span>
+                                        <span class="checkbox-text">Bypass TTS Cache (Force Re-synthesis)</span>
                                     </label>
-                                    <input type="range" id="tts-rate-range" min="-50" max="50" step="5" value="10" class="form-slider" style="width: 100%;">
-                                </div>
-                                <div class="form-group" style="margin-top: 15px; display: flex; align-items: center; gap: 8px;">
-                                    <input type="checkbox" id="bypass-cache-checkbox" style="width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent);">
-                                    <label for="bypass-cache-checkbox" class="form-label" style="margin: 0; cursor: pointer; user-select: none;">Bypass TTS Cache (Force Regeneration)</label>
-                                </div>
-                                <div class="form-group" style="margin-top: 10px; display: flex; align-items: center; gap: 8px;">
-                                    <input type="checkbox" id="bypass-scene-cache-checkbox" style="width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent);">
-                                    <label for="bypass-scene-cache-checkbox" class="form-label" style="margin: 0; cursor: pointer; user-select: none;">Bypass Scene Cache (Force Re-rendering)</label>
+                                    <label class="custom-checkbox">
+                                        <input type="checkbox" id="bypass-scene-cache-checkbox">
+                                        <span class="checkbox-box"></span>
+                                        <span class="checkbox-text">Bypass Scene Cache (Force Manim Re-rendering)</span>
+                                    </label>
                                 </div>
                             </div>
-                        </div>
-
-                        <button type="submit" class="btn-primary" id="generate-btn">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                stroke-width="2">
-                                <polygon points="5 3 19 12 5 21 5 3" />
-                            </svg>
-                            Generate Video
-                        </button>
-                    </form>
-
-                    <!-- Review Section (Scene Editor) -->
-                    <div id="review-section" class="review-section hidden">
-                        <div class="review-header">
-                            <h3 class="review-title">🎬 Review & Refine Your Lesson Scenes</h3>
-                            <p class="review-subtitle">Adjust narration, estimated durations, animations, and learning objectives before generating the final video.</p>
-                        </div>
-                        
-                        <div id="scenes-container" class="scenes-container">
-                            <!-- Scene cards will be dynamically injected here -->
-                        </div>
-                        
-                        <div class="review-actions-bar">
-                            <button type="button" class="btn-secondary" id="add-scene-btn">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <line x1="12" y1="5" x2="12" y2="19"></line>
-                                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                                </svg>
-                                Add Scene
-                            </button>
-                            <button type="button" class="btn-primary" id="approve-btn">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <polyline points="20 6 9 17 4 12"></polyline>
-                                </svg>
-                                Approve & Continue
-                            </button>
                         </div>
                     </div>
 
-                    <!-- Progress Section -->
-                    <div id="progress-section" class="progress-section hidden">
-                        <div class="progress-header">
-                            <h3 class="progress-title">Generating Your Video</h3>
-                            <span class="progress-percentage">0%</span>
+                    <!-- Submit Button -->
+                    <button type="submit" class="btn-primary" id="generate-btn">
+                        <span class="btn-icon">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10"/>
+                                <polygon points="10 8 16 12 10 16 10 8"/>
+                            </svg>
+                        </span>
+                        <span class="btn-text">Generate Animated Lesson</span>
+                        <svg class="btn-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                            <polyline points="12 5 19 12 12 19"></polyline>
+                        </svg>
+                    </button>
+                </form>
+
+                <!-- Scene Review Studio Section (Scene Breakdown & Refinement) -->
+                <div id="review-section" class="review-section hidden">
+                    <div class="review-header-bar">
+                        <div class="review-title-group">
+                            <span class="review-icon">🎬</span>
+                            <div>
+                                <h3 class="review-title">Lesson Storyboard Studio</h3>
+                                <p class="review-subtitle">Review, edit, and fine-tune narration &amp; animations before video compilation.</p>
+                            </div>
                         </div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="progress-fill"></div>
+                        <div class="review-stats" id="review-stats">
+                            <!-- Injected by app.js -->
                         </div>
-                        <div class="progress-steps">
-                            <div class="step" id="step-script">
-                                <div class="step-icon">1</div>
-                                <span class="step-label">Script Generation</span>
+                    </div>
+
+                    <div id="scenes-container" class="scenes-container">
+                        <!-- Scene cards dynamically injected by app.js -->
+                    </div>
+                    
+                    <div class="review-actions-bar">
+                        <button type="button" class="btn-secondary" id="add-scene-btn">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="12" y1="5" x2="12" y2="19"></line>
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                            Add New Scene
+                        </button>
+                        <button type="button" class="btn-primary btn-approve" id="approve-btn">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                <polyline points="20 6 9 17 4 12"></polyline>
+                            </svg>
+                            Approve &amp; Compile Video
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Progress HUD Section -->
+                <div id="progress-section" class="progress-section hidden">
+                    <div class="progress-hud-header">
+                        <div class="progress-title-block">
+                            <div class="pulsing-spinner"></div>
+                            <div>
+                                <h3 class="progress-title">Orchestrating AI Video Pipeline</h3>
+                                <span class="progress-subtitle">Compiling script, audio synthesis, and Manim geometry</span>
                             </div>
-                            <div class="step" id="step-tts">
-                                <div class="step-icon">2</div>
-                                <span class="step-label">Audio Synthesis</span>
+                        </div>
+                        <div class="progress-metrics">
+                            <span class="progress-elapsed-badge" id="progress-elapsed">00:00</span>
+                            <span class="progress-percentage-badge progress-percentage">0%</span>
+                        </div>
+                    </div>
+
+                    <div class="progress-bar-container">
+                        <div class="progress-fill" id="progress-fill"></div>
+                    </div>
+
+                    <!-- Pipeline Stages -->
+                    <div class="progress-steps-grid">
+                        <div class="step-card" id="step-script">
+                            <div class="step-badge">1</div>
+                            <div class="step-info">
+                                <span class="step-title">Scripting</span>
+                                <span class="step-desc">LLM Scenario</span>
                             </div>
-                            <div class="step" id="step-code">
-                                <div class="step-icon">3</div>
-                                <span class="step-label">Code Generation</span>
+                        </div>
+                        <div class="step-card" id="step-tts">
+                            <div class="step-badge">2</div>
+                            <div class="step-info">
+                                <span class="step-title">Audio TTS</span>
+                                <span class="step-desc">Neural Voice</span>
                             </div>
-                            <div class="step" id="step-video">
-                                <div class="step-icon">4</div>
-                                <span class="step-label">Video Compilation</span>
+                        </div>
+                        <div class="step-card" id="step-code">
+                            <div class="step-badge">3</div>
+                            <div class="step-info">
+                                <span class="step-title">Manim Code</span>
+                                <span class="step-desc">Python Generator</span>
+                            </div>
+                        </div>
+                        <div class="step-card" id="step-video">
+                            <div class="step-badge">4</div>
+                            <div class="step-info">
+                                <span class="step-title">Compilation</span>
+                                <span class="step-desc">FFmpeg Render</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Terminal Activity Log -->
+                    <div class="terminal-log-window">
+                        <div class="terminal-header">
+                            <div class="terminal-header-left">
+                                <div class="terminal-dots">
+                                    <span class="dot dot-red"></span>
+                                    <span class="dot dot-amber"></span>
+                                    <span class="dot dot-green"></span>
+                                </div>
+                                <span class="terminal-title">pipeline-activity.log</span>
+                            </div>
+                            <div class="terminal-filter-pills" id="terminal-filter-pills">
+                                <button type="button" class="filter-pill active" data-filter="ALL">ALL</button>
+                                <button type="button" class="filter-pill" data-filter="TTS">TTS</button>
+                                <button type="button" class="filter-pill" data-filter="LLM">LLM</button>
+                                <button type="button" class="filter-pill" data-filter="MANIM">MANIM</button>
+                                <button type="button" class="filter-pill" data-filter="RENDER">RENDER</button>
+                                <button type="button" class="filter-pill pill-err" data-filter="ERRORS">ERRORS</button>
+                            </div>
+                            <div class="terminal-actions">
+                                <button type="button" class="terminal-btn" id="autoscroll-toggle-btn" title="Toggle Live Auto-scroll">SCROLL: ON</button>
+                                <button type="button" class="terminal-btn" id="clear-log-btn" title="Clear Console Output">CLEAR</button>
+                                <button type="button" class="terminal-btn btn-highlight" id="copy-log-btn" title="Copy Log to Clipboard">COPY LOG</button>
                             </div>
                         </div>
                         <div class="progress-log" id="progress-log"></div>
-                    </div>
-
-                    <!-- Result Section -->
-                    <div id="result-section" class="result-section hidden">
-                        <div class="result-header">
-                            <h3 class="result-title">✨ Video Generated Successfully!</h3>
-                        </div>
-                        <video id="result-video" class="result-video" controls></video>
-                        <div class="result-actions">
-                            <a id="download-btn" class="btn-secondary" download>
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                    stroke-width="2">
-                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                                    <polyline points="7 10 12 15 17 10" />
-                                    <line x1="12" y1="15" x2="12" y2="3" />
-                                </svg>
-                                Download Video
-                            </a>
-                            <button class="btn-outline" onclick="location.reload()">
-                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                    stroke-width="2">
-                                    <polyline points="23 4 23 10 17 10" />
-                                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-                                </svg>
-                                Generate Another
-                            </button>
+                        <div id="terminal-progress-bar" class="terminal-progress-footer">
+                            <span class="mini-progress-label">[PROGRESS]</span>
+                            <div class="mini-bar-track">
+                                <div id="mini-bar-fill" class="mini-bar-fill" style="width: 0%;"></div>
+                            </div>
+                            <span id="mini-progress-text" class="mini-progress-text">0% &mdash; Idle</span>
                         </div>
                     </div>
                 </div>
+
+                <!-- Result Showcase Section -->
+                <div id="result-section" class="result-section hidden">
+                    <div class="result-celebration">
+                        <div class="result-icon-badge">✨</div>
+                        <h3 class="result-title">Your Educational Video is Ready!</h3>
+                        <p class="result-desc">Synthesized with neural audio narration and high-resolution Manim animation.</p>
+                    </div>
+
+                    <!-- Cinema Showcase Header & Inspector Tabs -->
+                    <div class="cinema-tab-header">
+                        <button type="button" class="cinema-tab-btn active" id="tab-btn-video">
+                            <span>🎬 Video Stream (1080p 60FPS)</span>
+                        </button>
+                        <button type="button" class="cinema-tab-btn" id="tab-btn-code">
+                            <span>🐍 Manim Python Code Inspector</span>
+                        </button>
+                    </div>
+
+                    <div class="video-showcase-frame" id="showcase-frame-video">
+                        <video id="result-video" class="result-video" controls poster=""></video>
+                    </div>
+
+                    <div class="code-showcase-frame hidden" id="showcase-frame-code">
+                        <div class="code-header">
+                            <span class="code-filename">generated_manim_scene.py</span>
+                            <button type="button" class="code-copy-btn" id="copy-code-btn">Copy Python Code</button>
+                        </div>
+                        <pre id="result-manim-code" class="code-body"># Generated Manim Community Edition Python Code will load dynamically</pre>
+                    </div>
+
+                    <div class="video-metadata-bar" id="video-metadata-bar">
+                        <span class="meta-badge"><span class="meta-icon">⏱️</span> <span id="meta-duration">--s</span></span>
+                        <span class="meta-badge"><span class="meta-icon">📦</span> <span id="meta-size">-- MB</span></span>
+                        <span class="meta-badge"><span class="meta-icon">🧠</span> <span id="meta-model">gemini-3.5-flash-lite</span></span>
+                        <span class="meta-badge meta-cost-badge" id="meta-cost-badge" title="Click to view ASCII Cost Audit Console (Shift + A)"><span class="meta-icon">💰</span> <span id="meta-cost">$0.0000</span> <span class="hotkey-pill">Shift+A</span></span>
+                        <span class="meta-badge"><span class="meta-icon">🎬</span> 1080p Manim CE</span>
+                    </div>
+
+                    <div class="result-actions">
+                        <a id="download-btn" class="btn-primary btn-download" download>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                <polyline points="7 10 12 15 17 10" />
+                                <line x1="12" y1="15" x2="12" y2="3" />
+                            </svg>
+                            Download MP4 Video
+                        </a>
+                        <button type="button" class="btn-secondary" onclick="location.reload()">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="23 4 23 10 17 10" />
+                                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                            </svg>
+                            Create Another Video
+                        </button>
+                    </div>
+                </div>
+
             </div>
         </div>
-    </section>
+    </main>
 
-    <!-- Features Section -->
-    <section id="features" class="features">
+    <!-- Specular Hairline Section Divider -->
+    <div class="container"><div class="section-divider"></div></div>
+
+    <!-- Bento Features Section -->
+    <section id="features" class="features-section">
         <div class="container">
-            <h2 class="section-title">Powerful Features</h2>
-            <div class="features-grid">
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <path
-                                d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-                            <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-                            <line x1="12" y1="22.08" x2="12" y2="12" />
+            <div class="section-header text-center">
+                <span class="section-tag">ENGINE ARCHITECTURE</span>
+                <h2 class="section-title">Built for end-to-end production</h2>
+                <p class="section-subtitle">A decoupled multi-agent engine designed for mathematical accuracy and high visual fidelity.</p>
+            </div>
+
+            <div class="bento-grid">
+                <div class="bento-card">
+                    <div class="bento-icon-wrapper icon-amber">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="3" width="7" height="7" rx="1.5"></rect>
+                            <rect x="14" y="3" width="7" height="7" rx="1.5"></rect>
+                            <rect x="14" y="14" width="7" height="7" rx="1.5"></rect>
+                            <path d="M6.5 10v7a2 2 0 0 0 2 2h5.5"></path>
                         </svg>
                     </div>
-                    <h3 class="feature-title">Multi-LLM Support</h3>
-                    <p class="feature-description">Automatic fallback between Claude and OpenAI for maximum reliability
-                    </p>
+                    <h3 class="bento-title">Multi-LLM Routing &amp; Fallback</h3>
+                    <p class="bento-desc">Automatic model failover across Gemini 1.5 Flash, Claude, and OpenAI to guarantee uninterrupted script generation.</p>
                 </div>
 
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
-                            <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+                <div class="bento-card">
+                    <div class="bento-icon-wrapper icon-purple">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 3v18"></path>
+                            <path d="m5 7 14 10"></path>
+                            <path d="M5 17 19 7"></path>
                         </svg>
                     </div>
-                    <h3 class="feature-title">Manim Animations</h3>
-                    <p class="feature-description">Professional mathematical and educational animations powered by Manim
-                    </p>
+                    <h3 class="bento-title">Manim Geometry Engine</h3>
+                    <p class="bento-desc">Hand-crafted mathematical animations rendered natively in Python — crisp vector animations without stock footage.</p>
                 </div>
 
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
-                            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                            <line x1="12" y1="19" x2="12" y2="23" />
-                            <line x1="8" y1="23" x2="16" y2="23" />
+                <div class="bento-card">
+                    <div class="bento-icon-wrapper icon-emerald">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M7 16V4m0 0L3 8m4-4l4 4"></path>
+                            <path d="M17 8v12m0 0l4-4m-4 4l-4-4"></path>
                         </svg>
                     </div>
-                    <h3 class="feature-title">TTS Integration</h3>
-                    <p class="feature-description">Natural voice narration with OpenAI's text-to-speech technology</p>
+                    <h3 class="bento-title">Neural TTS Audio Alignment</h3>
+                    <p class="bento-desc">High-clarity text-to-speech narration with automatic per-scene duration synchronization down to the millisecond.</p>
                 </div>
 
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <circle cx="12" cy="12" r="10" />
-                            <path d="M12 6v6l4 2" />
+                <div class="bento-card">
+                    <div class="bento-icon-wrapper icon-indigo">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                            <path d="M3 9h18"></path>
+                            <path d="M9 21V9"></path>
                         </svg>
                     </div>
-                    <h3 class="feature-title">60-Second Videos</h3>
-                    <p class="feature-description">Optimized content delivery in concise, engaging 1-minute videos</p>
+                    <h3 class="bento-title">Visual Storyboard Direction</h3>
+                    <p class="bento-desc">Dedicated visual director pass enforces composition diversity and anti-repetition rules across all scenes automatically.</p>
                 </div>
 
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <path d="M5 22h14" />
-                            <path d="M5 2h14" />
-                            <path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22" />
-                            <path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2" />
+                <div class="bento-card">
+                    <div class="bento-icon-wrapper icon-amber-gold">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#eab308" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                            <polyline points="2 17 12 22 22 17"></polyline>
+                            <polyline points="2 12 12 17 22 12"></polyline>
                         </svg>
                     </div>
-                    <h3 class="feature-title">Multi-Language</h3>
-                    <p class="feature-description">Automatic language detection and content generation in any language
-                    </p>
+                    <h3 class="bento-title">Deterministic Caching</h3>
+                    <p class="bento-desc">SHA-256 asset caching reuses generated audio and rendered scene videos for instant fast edits and re-compiles.</p>
                 </div>
 
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                <div class="bento-card">
+                    <div class="bento-icon-wrapper icon-cyan">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path>
+                            <path d="M2 12h20"></path>
                         </svg>
                     </div>
-                    <h3 class="feature-title">Context Aware</h3>
-                    <p class="feature-description">Maintains visual continuity across scenes with intelligent context
-                        propagation</p>
+                    <h3 class="bento-title">Multilingual Support</h3>
+                    <p class="bento-desc">Automatic topic language detection adapts narration, typography, and script structure for global education markets.</p>
                 </div>
             </div>
         </div>
@@ -331,41 +604,69 @@
 
     <!-- Footer -->
     <footer class="footer">
-        <div class="container">
-            <div class="footer-content">
-                <div class="footer-brand">
-                    <div class="logo">
-                        <svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <rect width="40" height="40" rx="8" fill="url(#footer-logo-gradient)" />
-                            <path d="M12 20L18 14L24 20L30 14" stroke="white" stroke-width="2.5" stroke-linecap="round"
-                                stroke-linejoin="round" />
-                            <circle cx="18" cy="26" r="2" fill="white" />
-                            <circle cx="24" cy="26" r="2" fill="white" />
-                            <defs>
-                                <linearGradient id="footer-logo-gradient" x1="0" y1="0" x2="40" y2="40">
-                                    <stop offset="0%" stop-color="#6366f1" />
-                                    <stop offset="100%" stop-color="#8b5cf6" />
-                                </linearGradient>
-                            </defs>
-                        </svg>
-                        <span class="logo-text">Prompt2Learn.ai</span>
-                    </div>
-                    <p class="footer-tagline">AI-powered educational video generation</p>
+        <div class="container footer-container">
+            <div class="footer-brand">
+                <div class="logo-wrapper">
+                    <span class="logo-text">P2L<span class="logo-suffix">.ai</span></span>
                 </div>
-                <div class="footer-links">
-                    <a href="https://github.com/mateolafalce/prompt2learn.ai" target="_blank" class="footer-link">GitHub</a>
-                    <a href="https://github.com/mateolafalce/prompt2learn.ai/issues" target="_blank"
-                        class="footer-link">Report Issue</a>
-                    <a href="https://github.com/mateolafalce" target="_blank" class="footer-link">Developer</a>
-                </div>
+                <p class="footer-tagline">Autonomous AI Educational Video Generation Studio</p>
+                <p class="footer-tech">Manim CE &bull; Multi-LLM Engine &bull; Neural TTS</p>
             </div>
-            <div class="footer-bottom">
-                <p>&copy; 2026 Prompt2Learn.ai. Open Source Project.</p>
+            <div class="footer-links">
+                <a href="#studio" class="footer-link">Studio Generator</a>
+                <a href="#features" class="footer-link">Engine Architecture</a>
+                <a href="#studio" class="footer-link">Presets</a>
             </div>
         </div>
-    </footer>
+        <div class="footer-bottom">
+            <div class="container">
+                <p>&copy; 2026 P2L.ai (Prompt2Learn). All Rights Reserved.</p>
+            </div>
+        </div>
+    <!-- Cyberpunk ASCII TUI Analytics Modal -->
+    <div id="ascii-tui-modal" class="ascii-tui-modal hidden">
+        <div class="ascii-modal-overlay" id="ascii-modal-overlay"></div>
+        <div class="ascii-terminal-window">
+            <div class="ascii-terminal-header">
+                <div class="terminal-dots">
+                    <span class="dot dot-red" id="ascii-modal-close-btn" style="cursor: pointer;"></span>
+                    <span class="dot dot-yellow"></span>
+                    <span class="dot dot-green"></span>
+                </div>
+                <span class="ascii-terminal-title">$ prompt2learn --analytics --cost-audit</span>
+                <span class="ascii-hotkey-badge">ESC / Shift+A</span>
+            </div>
+            <div class="ascii-terminal-body">
+                <pre id="ascii-typewriter-content" class="ascii-typewriter-text"></pre>
+                <span class="ascii-blinking-cursor">█</span>
+            </div>
+            <div class="ascii-terminal-footer">
+                <span class="footer-tag">[STATUS] TELEMETRY ACTIVE</span>
+                <button type="button" class="ascii-copy-btn" id="ascii-copy-btn">$ copy --json</button>
+            </div>
+        </div>
+    </div>
 
+    <!-- JS -->
     <script src="/static/app.js"></script>
+
+    <!-- Interactive Chip Handler -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const topicInput = document.getElementById('topic-input');
+            document.querySelectorAll('.chip-btn').forEach(function(chip) {
+                chip.addEventListener('click', function() {
+                    const topic = this.getAttribute('data-topic');
+                    if (topicInput && topic) {
+                        topicInput.value = topic;
+                        topicInput.focus();
+                        topicInput.classList.add('pulse-input');
+                        setTimeout(function() { topicInput.classList.remove('pulse-input'); }, 600);
+                    }
+                });
+            });
+        });
+    </script>
 </body>
 
 </html>

@@ -31,6 +31,11 @@ video-output.json
 *.swo
 *~
 
+# Local AI tooling (Claude Code config, installed skill packages)
+.claude
+.agents
+skills-lock.json
+
 # OS
 .DS_Store
 Thumbs.db

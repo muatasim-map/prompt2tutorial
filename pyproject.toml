@@ -28,8 +28,11 @@ dependencies = [
     "manim>=0.18.0",
     "flask>=3.0.0",
     "flask-cors>=4.0.0",
-    "google-genai>=0.1.1",
+    "google-genai>=1.0.0",
     "edge-tts>=6.1.12",
+    "pydantic>=2.0.0",
+    "pillow>=10.0.0",
+    "numpy>=1.24.0",
 ]
 
 [project.optional-dependencies]
@@ -68,3 +71,8 @@ python_version = "3.9"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"

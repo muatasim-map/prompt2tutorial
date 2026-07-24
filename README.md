@@ -86,12 +86,160 @@ Automatic educational video generator using AI and Manim. Converts any topic int
 
 ## Features
 
-- **Multi-LLM Support** with automatic fallback (OpenAI GPT, Claude)
-- **Automatic script generation** using advanced language models
+- **Visual-direction system** — a validated per-video **storyboard** directs every
+  scene (unique metaphor, composition, motion, color role, transition), a
+  **visual ledger** prevents repetition, and diversity rules enforce genuinely
+  distinct scenes (≥5 for 60s, ≥8 for 120s). Scenes stay bespoke — no fixed
+  template library.
+- **Visual QA artifacts** — per-scene frame extraction, a per-job **contact
+  sheet**, and heuristic quality flags (blank/white/low-variance/edge-clipping/
+  no-change/near-identical/text-only/repeated-layout). Flags are advisory and
+  recorded for review; they never silently drop scenes.
+- **Scene-level visual repair** — a blank render regenerates only that one scene
+  (configurable, default 1 attempt); the rest of the video is untouched.
+- **Multi-LLM Support** with automatic fallback (Gemini, Claude, OpenAI)
+- **First-class Gemini support** with role-based model routing (a fast model for
+  scripts, a high-quality model for storyboard + Manim animation code)
+- **Resilient Gemini calls**: SDK-native exponential backoff + jitter, per-model
+  cooldown after repeated 429s, bounded concurrency, and configurable fallback —
+  no silent quality downgrades
+- **Pydantic-validated** script/scene JSON with a single controlled repair pass
+- **Per-job asset isolation** under `media/jobs/<job_id>/` (no cross-job collisions)
+- **FFmpeg-based** audio concatenation, video concatenation, and muxing with an
+  **FFprobe validation gate** before a job is marked complete
 - **Educational animations** with Manim Community Edition
 - **Multi-language support** (automatically detects topic language)
-- **Optimized videos** of ~60 seconds with multiple scenes
-- **Automatic concatenation** of fragments into final video
+
+## Requirements
+
+- Python 3.10+
+- **FFmpeg and FFprobe** on `PATH` (required for audio/video assembly and output
+  validation). Verify with `ffmpeg -version` and `ffprobe -version`.
+- Manim Community Edition system dependencies (Cairo, Pango) — installed
+  automatically via `uv sync` / the Docker image.
+- At least one LLM API key (Gemini, Claude, or OpenAI).
+
+## Configuration
+
+Copy `.env.example` to `.env` and configure at least one provider. Key settings:
+
+| Variable | Purpose |
+| --- | --- |
+| `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Gemini access |
+| `CLAUDE_API_KEY`, `OPENAI_API_KEY` | Claude / OpenAI access (OpenAI also powers OpenAI TTS) |
+| `GEMINI_SCRIPT_MODEL` | Fast model for script + scene JSON |
+| `GEMINI_ANIMATION_MODEL` | High-quality model for Manim code (e.g. Gemini 3.6 Flash) |
+| `GEMINI_REPAIR_MODEL` | Model used to repair invalid JSON / failed compiles |
+| `GEMINI_FALLBACK_MODEL` | Used only after the selected model's retries/cooldown; blank disables |
+| `GEMINI_RETRY_ATTEMPTS`, `GEMINI_RETRY_INITIAL_DELAY`, `GEMINI_RETRY_MAX_DELAY` | Bounded retry tuning (single SDK retry system) |
+| `GEMINI_COOLDOWN_THRESHOLD`, `GEMINI_COOLDOWN_SECONDS` | Cooldown after repeated 429s |
+| `GEMINI_MAX_CONCURRENCY` | In-process concurrency limit for Gemini calls |
+| `LLM_FALLBACK_ENABLED` | Toggle automatic in-provider fallback |
+| `TTS_PROVIDER`, `TTS_MODEL`, `VOICE`, `EDGE_TTS_RATE` | Narration settings |
+| `SCRIPT_CACHE_ENABLED`, `SCENE_CACHE_ENABLED`, `TTS_CACHE_ENABLED` | Content-addressed caches |
+| `GEMINI_STORYBOARD_MODEL` | Model for the visual-direction pass (blank → animation model) |
+| `STORYBOARD_ENABLED` | Master toggle for the storyboard pass |
+| `VISUAL_REPAIR_ATTEMPTS` | Max scene-level visual repairs for a blank render (default 1) |
+| `CONTACT_SHEET_ENABLED`, `VISUAL_QA_ENABLED` | Contact sheet + heuristic QA report |
+| `GLOBAL_VISUAL_STYLE` | Override the global visual style contract (blank → default) |
+| `MANIM_QUALITY` | `low` (480p15, fast) \| `medium` (720p30) \| `high` (1080p60) |
+| `QA_*` (see `.env.example`) | Visual-QA heuristic thresholds |
+| `PORT` | App port (must match Docker `EXPOSE` / compose mapping) |
+
+> Gemini model IDs are placeholders in the defaults — set the exact model names
+> your Google account can access. Never commit real API keys.
+
+## Visual-direction system
+
+Every video is planned before any Manim code is written:
+
+1. **Storyboard pass** — after the script is validated, one LLM request (using the
+   strongest configured model) produces a Pydantic-validated `Storyboard`: a global
+   style contract plus, per scene, a learning goal, key concept, unique visual
+   metaphor, composition, primary objects, primary motion, color role, camera plan,
+   transition-from-previous, on-screen text, anti-repetition notes, and visual
+   complexity. Saved to `logs/storyboard.json`.
+2. **Diversity enforcement** — the storyboard must provide enough distinct visual
+   approaches (≥5 for 60s, ≥8 for 120s), avoid adjacent metaphor/layout repeats,
+   and not reuse a layout more than twice. A violated storyboard is repaired once;
+   residual notes are recorded (never fatal).
+3. **Visual ledger** — as scenes render, used metaphors/layouts/objects/colors/
+   motions/transitions accumulate (`logs/visual_ledger.json`). Each scene prompt
+   receives its storyboard entry, the global style, a compact previous-scene
+   summary, and the compact ledger — plus explicit "do not repeat" instructions.
+   Full prior source code is never re-sent.
+4. **Optional primitives** — `src/visual_primitives.py` offers low-level building
+   blocks (styled text, nodes/edges, chips, bars, safe layout/framing, transitions)
+   the model *may* import. They compose into bespoke scenes; they are not fixed
+   templates.
+5. **Visual QA** — representative frames are extracted per scene, analysed
+   (Pillow + numpy), assembled into `qa/contact_sheet.png`, and flagged
+   (`qa/visual_qa.json`). A blank render triggers one scene-level visual repair.
+
+### Where to find a job's artifacts
+
+For job `<job_id>` (all served under `/media/...`):
+
+| Artifact | Path |
+| --- | --- |
+| Storyboard | `media/jobs/<job_id>/logs/storyboard.json` |
+| Visual ledger | `media/jobs/<job_id>/logs/visual_ledger.json` |
+| Contact sheet | `media/jobs/<job_id>/qa/contact_sheet.png` |
+| Visual QA report | `media/jobs/<job_id>/qa/visual_qa.json` |
+| Per-scene frames | `media/jobs/<job_id>/qa/frame_*.png` |
+| Final MP4 | `media/jobs/<job_id>/final/output_<job_id>.mp4` |
+
+Their URLs are also surfaced in the job status `metadata` (and logged in the UI).
+
+## Per-job media layout
+
+Each generation job writes to an isolated workspace:
+
+```
+media/jobs/<job_id>/
+  audio/    TTS fragments + final narration (narration.m4a)
+  scenes/   rendered per-scene mp4s
+  code/     generated Manim .py source
+  video/    concat manifests + silent concat output
+  logs/     job logs + manifest
+  final/    final muxed mp4  (served at /media/jobs/<job_id>/final/output_<job_id>.mp4)
+```
+
+Reusable content-addressed caches (`media/script_cache`, `media/scene_cache`,
+`media/tts_cache`) live outside the job trees and are keyed by model/settings/input
+plus a `CACHE_VERSION`.
+
+## Testing
+
+```bash
+uv pip install pytest    # or: pip install pytest
+python -m pytest         # 89 unit tests; no live API/paid calls
+```
+
+## Troubleshooting
+
+**Gemini 429 / `RESOURCE_EXHAUSTED`** — the app retries with backoff (SDK), then
+cools the model down and, if configured, falls back to `GEMINI_FALLBACK_MODEL`.
+Reduce `GEMINI_MAX_CONCURRENCY`, raise `GEMINI_COOLDOWN_SECONDS`, or switch
+`GEMINI_SCRIPT_MODEL` to a higher-quota model. Job status exposes the selected
+model, cooldown state, and fallback reason.
+
+**Gemini 503 / overload / timeout** — handled as transient by the SDK retry
+policy; persistent failures fall back (if configured) or fail the job with a safe
+message while preserving assets.
+
+**Final video failed validation** — the job is marked failed with the reason
+(e.g. missing audio stream, zero duration, duration out of tolerance). Inspect the
+preserved assets under `media/jobs/<job_id>/` (`video/silent.mp4`, `audio/`,
+`code/`). Ensure FFmpeg/FFprobe are installed and on `PATH`.
+
+**Scenes look repetitive or flagged** — open `qa/contact_sheet.png` and
+`qa/visual_qa.json` for the job. Flags (`likely_repeated_layout`,
+`text_only_scene`, `near_identical_to_previous_scene`, …) are advisory. To push
+more variety, ensure `STORYBOARD_ENABLED=true`, use a stronger
+`GEMINI_ANIMATION_MODEL`/`GEMINI_STORYBOARD_MODEL`, and regenerate with the
+scene-cache bypass. A `blank_or_black` flag auto-triggers one scene-level visual
+repair (`VISUAL_REPAIR_ATTEMPTS`).
 
 ## Architecture
 

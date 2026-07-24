@@ -32,15 +32,17 @@ RUN uv pip install --system -r requirements.txt
 # Copy application code
 COPY . .
 
-# Create necessary directories
-RUN mkdir -p media public
+# Create necessary directories (per-job assets are created at runtime)
+RUN mkdir -p media/jobs content public
 
-# Expose port 5000
+# Expose the application port
 EXPOSE 5000
 
 # Set environment variables
 ENV FLASK_APP=src/main.py
 ENV PYTHONUNBUFFERED=1
+# PORT must match EXPOSE / compose mapping; main.py honours $PORT (default 5000)
+ENV PORT=5000
 
 # Run the application
 CMD ["python", "src/main.py"]

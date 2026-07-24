@@ -6,29 +6,41 @@ import edge_tts
 import hashlib
 import json
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from openai import OpenAI
 from abc import ABC, abstractmethod
 
 
+def _env_int(name, default):
+    """Read a small positive integer from the environment, falling back safely."""
+    try:
+        return int(float(os.getenv(name, str(default))))
+    except (TypeError, ValueError):
+        return default
+
+from ffmpeg_utils import FFMPEG_BIN, FFPROBE_BIN, FFmpegError, concat_audio
+from media_paths import CACHE_VERSION, TTS_CACHE_DIR
+
+
 def get_audio_duration(audio_path):
     """
     Gets the duration of an audio file using ffprobe
-    
+
     Args:
         audio_path: Path to the audio file
-    
+
     Returns:
         Duration in seconds (float) or None if error
     """
     try:
         cmd = [
-            "ffprobe", "-v", "error",
+            FFPROBE_BIN, "-v", "error",
             "-show_entries", "format=duration",
             "-of", "default=noprint_wrappers=1:nokey=1",
-            audio_path
+            str(audio_path)
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, shell=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
         if result.returncode == 0:
             duration = float(result.stdout.strip())
             return duration
@@ -209,9 +221,9 @@ class FallbackTTSProvider(TTSProvider):
 
 
 class CachingTTSProvider(TTSProvider):
-    def __init__(self, provider, cache_dir="media/tts_cache"):
+    def __init__(self, provider, cache_dir=None):
         self.provider = provider
-        self.cache_dir = cache_dir
+        self.cache_dir = str(cache_dir) if cache_dir else str(TTS_CACHE_DIR)
         self.cache_enabled = os.getenv("TTS_CACHE_ENABLED", "true").lower() == "true"
 
     def get_settings(self):
@@ -221,17 +233,20 @@ class CachingTTSProvider(TTSProvider):
         }
 
     def generate_fragment(self, text, index, output_dir="media/audio_fragments", bypass_cache=False, status_callback=None, total_scenes=1):
+        words = len((text or '').split())
         if not self.cache_enabled or bypass_cache:
             if bypass_cache:
                 print(f"  [CACHE BYPASS] Forcing regeneration for scene {index}")
             if status_callback:
                 progress = 30 + (index / total_scenes) * 10
-                status_callback(progress=progress, message=f"→ Scene {index}/{total_scenes} (TTS Generation)")
+                status_callback(progress=progress, message=f"[INFO] [TTS] Scene {index}/{total_scenes}: Synthesizing neural audio ({words} words)...")
             return self.provider.generate_fragment(text, index, output_dir)
             
-        # Generate content-based cache key
+        # Generate content-based cache key (includes cache version so bumping
+        # CACHE_VERSION transparently invalidates stale entries).
         settings = self.provider.get_settings()
         hash_data = {
+            "cache_version": CACHE_VERSION,
             "text": text,
             "settings": settings
         }
@@ -256,7 +271,7 @@ class CachingTTSProvider(TTSProvider):
                     print(f"  [CACHE HIT] Reused cached TTS for scene {index} (duration: {duration:.2f}s, key: {cache_key[:12]})")
                     if status_callback:
                         progress = 30 + (index / total_scenes) * 10
-                        status_callback(progress=progress, message=f"✓ Scene {index}/{total_scenes} (TTS Cache: {cache_key[:8]}...)")
+                        status_callback(progress=progress, message=f"[OK] [CACHE] Scene {index}/{total_scenes}: Reused cached audio ({duration:.1f}s, key: {cache_key[:8]})")
                     return target_path, duration
             except Exception as e:
                 print(f"  [WARNING] Failed to load cache metadata: {e}")
@@ -264,7 +279,7 @@ class CachingTTSProvider(TTSProvider):
         # Cache miss: generate normally
         if status_callback:
             progress = 30 + (index / total_scenes) * 10
-            status_callback(progress=progress, message=f"→ Scene {index}/{total_scenes} (TTS Generation)")
+            status_callback(progress=progress, message=f"[INFO] [TTS] Scene {index}/{total_scenes}: Synthesizing neural audio ({words} words)...")
             
         audio_path, duration = self.provider.generate_fragment(text, index, output_dir)
         
@@ -280,10 +295,11 @@ class CachingTTSProvider(TTSProvider):
                     json.dump(metadata, f, indent=2)
                 print(f"  [CACHE STORE] Saved TTS fragment to cache (key: {cache_key[:12]})")
                 if status_callback:
+                    size_kb = os.path.getsize(audio_path) / 1024.0
                     progress = 30 + (index / total_scenes) * 10
-                    status_callback(progress=progress, message=f"✓ Scene {index}/{total_scenes} (TTS Generated: {cache_key[:8]}...)")
+                    status_callback(progress=progress, message=f"[OK] [TTS] Scene {index}/{total_scenes}: Audio synthesized ({duration:.1f}s, size: {size_kb:.1f} KB)")
             except Exception as e:
-                print(f"  [WARNING] Failed to write cache entry: {e}")
+                print(f"  [WARNING] Failed to write cache: {e}")
                 
         return audio_path, duration
 
@@ -308,45 +324,61 @@ def generate_audio_fragment(client, text, index, output_dir="media/audio_fragmen
     return caching_provider.generate_fragment(text, index, output_dir, bypass_cache=bypass_cache, status_callback=status_callback, total_scenes=total_scenes)
 
 
-def concatenate_audio_fragments(audio_paths, output_path="media/audio.mp3"):
+def concatenate_audio_fragments(audio_paths, output_path, list_file):
     """
-    Concatenates multiple audio fragments into a single MP3 file using binary concatenation
-    
+    Concatenates audio fragments into a single valid narration file using FFmpeg.
+
+    Fragments are re-encoded to a uniform AAC/m4a track (44.1 kHz stereo). This
+    replaces the previous invalid binary-copy MP3 concatenation.
+
     Args:
-        audio_paths: List of paths to audio fragments
-        output_path: Path for the final concatenated audio file
-    
+        audio_paths: Ordered list of fragment paths (scene order preserved).
+        output_path: Path for the final narration file.
+        list_file: Per-job concat manifest path (must be unique per job).
+
     Returns:
-        True if successful, False otherwise
+        True on success, False otherwise.
     """
     if not audio_paths:
         print("[ERROR] No audio fragments to concatenate")
         return False
-    
     try:
-        os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-        print(f"\n  Concatenating {len(audio_paths)} audio fragments via binary copy...")
-        
-        with open(output_path, 'wb') as outfile:
-            for path in audio_paths:
-                if os.path.exists(path):
-                    with open(path, 'rb') as infile:
-                        outfile.write(infile.read())
-                        
+        print(f"\n  Concatenating {len(audio_paths)} audio fragments via FFmpeg...")
+        concat_audio(audio_paths, output_path, list_file)
         print(f"  [OK] Final audio created: {output_path}")
         return True
-    except Exception as e:
-        print(f"  [ERROR] Binary audio concatenation failed: {e}")
+    except FFmpegError as e:
+        print(f"  [ERROR] FFmpeg audio concatenation failed: {e}")
         return False
 
 
-def generate_complete_audio(client, video_data, tts_provider=None, tts_model="tts-1", voice="alloy", tts_voice=None, tts_rate=None, bypass_cache=False, status_callback=None):
+def generate_complete_audio(
+    client,
+    video_data,
+    output_dir,
+    output_path,
+    list_file,
+    tts_provider=None,
+    tts_model="tts-1",
+    voice="alloy",
+    tts_voice=None,
+    tts_rate=None,
+    bypass_cache=False,
+    status_callback=None,
+):
     """
-    Generates complete audio for all scenes
-    
+    Generates complete narration audio for all scenes into per-job paths.
+
+    Args:
+        output_dir: Per-job directory for TTS fragments.
+        output_path: Per-job final narration file path.
+        list_file: Per-job FFmpeg concat manifest path.
+
     Returns:
-        Tuple of (audio_path, durations_dict) where durations_dict maps scene index to duration
+        Tuple of (audio_path, durations_dict) mapping scene index -> duration.
     """
+    output_dir = str(output_dir)
+    output_path = str(output_path)
     selected_provider = tts_provider or os.getenv("TTS_PROVIDER", "openai").lower()
     print(f"\n{'='*80}")
     print(f"GENERATING AUDIO WITH TTS")
@@ -364,17 +396,25 @@ def generate_complete_audio(client, video_data, tts_provider=None, tts_model="tt
     audio_durations = {}
     total_scenes = len(video_data)
     
-    for index, scene_data in enumerate(video_data, 1):
-        text = scene_data.get('text', '')
-        
+    # TTS fragments are independent network calls that each write to their own
+    # fragment_<index>.mp3, so they can be produced concurrently. Results are
+    # re-assembled strictly by scene index below, keeping narration order and
+    # audio content byte-for-byte identical to sequential generation.
+    pending = [(i, s.get('text', '')) for i, s in enumerate(video_data, 1)]
+    for index, text in pending:
         if not text:
             print(f"  [WARNING] Scene {index} has no text, skipping...")
-            continue
-        
-        audio_path, duration = generate_audio_fragment(
+
+    work = [(i, t) for i, t in pending if t]
+    max_workers = max(1, min(_env_int("TTS_MAX_CONCURRENCY", 4), len(work) or 1))
+
+    def _one(item):
+        index, text = item
+        return index, generate_audio_fragment(
             client=client,
             text=text,
             index=index,
+            output_dir=output_dir,
             tts_provider=tts_provider,
             tts_model=tts_model,
             voice=voice,
@@ -382,24 +422,37 @@ def generate_complete_audio(client, video_data, tts_provider=None, tts_model="tt
             tts_rate=tts_rate,
             bypass_cache=bypass_cache,
             status_callback=status_callback,
-            total_scenes=total_scenes
+            total_scenes=total_scenes,
         )
-        
+
+    results = {}
+    if max_workers > 1 and len(work) > 1:
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            for index, outcome in pool.map(_one, work):
+                results[index] = outcome
+    else:
+        for item in work:
+            index, outcome = _one(item)
+            results[index] = outcome
+
+    # Re-assemble in scene order — this is what guarantees correct narration order.
+    for index, _text in work:
+        audio_path, duration = results.get(index, (None, None))
         if audio_path and os.path.exists(audio_path):
             audio_fragments.append(audio_path)
             if duration:
                 audio_durations[index] = duration
         else:
             print(f"  [WARNING] Could not generate audio for scene {index}")
-    
+
+
     if audio_fragments:
         print(f"\n{'='*80}")
         print(f"CONCATENATING {len(audio_fragments)} AUDIO FRAGMENTS")
         print(f"{'='*80}")
         
-        output_path = "media/audio.mp3"
-        success = concatenate_audio_fragments(audio_fragments, output_path)
-        
+        success = concatenate_audio_fragments(audio_fragments, output_path, list_file)
+
         if success:
             print(f"\n[OK] Complete audio generated: {output_path}\n")
             return output_path, audio_durations

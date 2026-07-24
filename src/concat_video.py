@@ -1,169 +1,191 @@
-import subprocess
+"""Manim compilation + FFmpeg-based video assembly.
+
+* ``compile_video`` renders a single scene with Manim into a **job-scoped**
+  media directory and returns the absolute output path (no reliance on CWD).
+* ``concatenate_videos`` / ``merge_video_and_audio`` delegate to
+  :mod:`ffmpeg_utils`, replacing the previous fragile PyAV raw-packet handling.
+"""
+
+from __future__ import annotations
+
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
+from typing import Optional, Sequence, Tuple
 
-def sanitize_filename(filename):
-    """Remove or replace problematic characters from filenames"""
-    # Remove apostrophes, question marks, and other special characters
-    # Replace with underscores or remove them
+from ffmpeg_utils import FFmpegError, concat_video, mux_video_audio
+
+# Manim quality presets -> (CLI flag, output subfolder). ``low`` (480p15) is the
+# fast default; ``high`` (1080p60) is available via the MANIM_QUALITY env var.
+_QUALITY_PRESETS = {
+    "low": ("-ql", "480p15"),
+    "medium": ("-qm", "720p30"),
+    "high": ("-qh", "1080p60"),
+}
+# Backwards-compatible module constants (default = low).
+MANIM_QUALITY_FLAG, MANIM_QUALITY_DIR = _QUALITY_PRESETS["low"]
+
+
+def _resolve_quality() -> Tuple[str, str]:
+    """Return (flag, output_subdir) for the configured MANIM_QUALITY."""
+    quality = os.getenv("MANIM_QUALITY", "low").strip().lower()
+    return _QUALITY_PRESETS.get(quality, _QUALITY_PRESETS["low"])
+
+
+# A normal low-quality scene renders in well under 20s; medium/high take longer.
+# These bounds fail-fast on a genuine hang (which would otherwise stall a whole
+# job) while leaving generous headroom for legitimate complex/3D/graph scenes.
+_COMPILE_TIMEOUTS = {"low": 120, "medium": 240, "high": 300}
+
+# True 3D scenes (mesh Surfaces, multiple solids, camera-space geometry) cost
+# meaningfully more render time on this cairo/CPU renderer than a flat or
+# layered-2.5D scene of the same duration. The 2D-calibrated timeout above was
+# observed causing repeated false-timeout failures on 3D scenes (3 consecutive
+# 120s timeouts before any repair could even help) — this multiplier gives 3D
+# scenes a realistic budget instead of one tuned for 2D.
+_THREED_TIMEOUT_MULTIPLIER = 2.5
+
+
+def resolve_compile_timeout(is_3d: bool = False) -> int:
+    """Timeout (s) for a single Manim render, scaled to quality (and dimension).
+
+    Overridable via MANIM_COMPILE_TIMEOUT (applied BEFORE the 3D multiplier, so
+    an explicit override still gets the 3D allowance on top). Never below 60s.
+    """
+    override = os.getenv("MANIM_COMPILE_TIMEOUT")
+    if override:
+        try:
+            base = max(60, int(float(override)))
+        except (TypeError, ValueError):
+            base = None
+    else:
+        base = None
+    if base is None:
+        quality = os.getenv("MANIM_QUALITY", "low").strip().lower()
+        base = _COMPILE_TIMEOUTS.get(quality, _COMPILE_TIMEOUTS["low"])
+    if is_3d:
+        base = int(round(base * _THREED_TIMEOUT_MULTIPLIER))
+    return base
+
+
+def _manim_env(scene_dir: Path) -> dict:
+    """Env for the Manim subprocess so generated scenes can import helpers.
+
+    Adds the scene's own directory (where ``visual_primitives.py`` is copied) and
+    this ``src`` directory to PYTHONPATH.
+    """
+    env = os.environ.copy()
+    src_dir = str(Path(__file__).resolve().parent)
+    extra = os.pathsep.join([str(scene_dir), src_dir])
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (extra + os.pathsep + existing) if existing else extra
+    return env
+
+
+def sanitize_filename(filename: str) -> str:
+    """Remove characters that are problematic in filenames."""
     sanitized = re.sub(r"['\"\?!:;,\(\)\[\]\{\}]", "", filename)
-    # Replace multiple underscores with single underscore
     sanitized = re.sub(r"_+", "_", sanitized)
-    # Remove leading/trailing underscores
-    sanitized = sanitized.strip("_")
-    return sanitized
+    return sanitized.strip("_")
 
-def compile_video(file_path, class_name, topic_slug, index):
-    """Compiles the video using Manim
-    
+
+def _resolve_manim_executable() -> str:
+    """Locate the manim executable in the active virtualenv, else fall back."""
+    py_bin_dir = Path(sys.executable).parent
+    for candidate in (py_bin_dir / "manim.exe", py_bin_dir / "manim"):
+        if candidate.exists():
+            return str(candidate)
+    return "manim"
+
+
+def compile_video(
+    file_path: str | os.PathLike,
+    class_name: str,
+    media_dir: str | os.PathLike,
+    timeout: Optional[int] = None,
+    is_3d: bool = False,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Render one Manim scene into ``media_dir`` and return its absolute path.
+
+    Args:
+        file_path: Path to the generated ``.py`` scene file.
+        class_name: The ``Scene`` subclass to render.
+        media_dir: Job-scoped Manim media output root (keeps renders isolated).
+        timeout: Per-scene render timeout in seconds. When ``None`` it is scaled
+            to the render quality (see :func:`resolve_compile_timeout`), so a
+            hung render fails fast instead of stalling the whole job for 5 min.
+        is_3d: Whether this scene is a ThreeDScene. Only used when ``timeout``
+            is ``None`` — gives 3D scenes a realistic budget instead of the
+            2D-calibrated default (a 3D scene can legitimately take longer to
+            render than the same duration in 2D).
+
     Returns:
-        tuple: (video_path, error_message) - video_path is None if failed, error_message is None if success
+        ``(video_path, error_message)`` — ``video_path`` is ``None`` on failure;
+        ``error_message`` is ``None`` on success.
     """
+    file_path = Path(file_path)
+    media_dir = Path(media_dir)
+    media_dir.mkdir(parents=True, exist_ok=True)
+    quality_flag, quality_dir = _resolve_quality()
+    if timeout is None:
+        timeout = resolve_compile_timeout(is_3d=is_3d)
+
+    cmd = [
+        _resolve_manim_executable(),
+        quality_flag,
+        "--media_dir", str(media_dir),
+        str(file_path),
+        class_name,
+    ]
+    print(f"\nCompiling: {' '.join(cmd)}")
+
     try:
-        # Resolve path to manim executable in the current virtual environment
-        py_bin_dir = Path(sys.executable).parent
-        manim_executable = "manim"
-        possible_paths = [
-            py_bin_dir / "manim.exe",
-            py_bin_dir / "manim",
-        ]
-        for path in possible_paths:
-            if path.exists():
-                manim_executable = str(path)
-                break
-                
-        cmd = [manim_executable, "-ql", file_path, class_name]
-        print(f"\nCompiling: {' '.join(cmd)}")
-        
         result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=300  # 5 minutes timeout
+            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
+            env=_manim_env(file_path.parent),
         )
-        
-        if result.returncode == 0:
-            print(f"[OK] Video compiled successfully")
-            # Manim creates directory based on the Python filename (without extension)
-            # Extract filename without extension from file_path
-            filename_without_ext = os.path.splitext(os.path.basename(file_path))[0]
-            # Video will be in media/videos/{filename_without_extension}/480p15/{class_name}.mp4
-            video_path = f"media/videos/{filename_without_ext}/480p15/{class_name}.mp4"
-            return video_path, None
-        else:
-            error_msg = result.stderr
-            print(f"[ERROR] Error compiling video:")
-            print(error_msg)
-            return None, error_msg
-            
     except subprocess.TimeoutExpired:
-        error_msg = "Timeout: Compilation took more than 5 minutes"
-        print(f"[ERROR] {error_msg}")
-        return None, error_msg
-    except Exception as e:
-        error_msg = str(e)
-        print(f"[ERROR] Error: {error_msg}")
-        return None, error_msg
+        return None, f"Timeout: compilation exceeded {timeout} seconds"
+    except FileNotFoundError as exc:
+        return None, f"manim executable not found: {exc}"
+    except Exception as exc:  # pragma: no cover - defensive
+        return None, str(exc)
+
+    if result.returncode != 0:
+        print("[ERROR] Manim compilation failed")
+        return None, result.stderr or result.stdout or "unknown manim error"
+
+    filename_no_ext = file_path.stem
+    video_path = media_dir / "videos" / filename_no_ext / quality_dir / f"{class_name}.mp4"
+    if not video_path.exists():
+        return None, f"manim reported success but output missing: {video_path}"
+    print(f"[OK] Video compiled: {video_path}")
+    return str(video_path), None
 
 
-def concatenate_videos(video_paths, output_path):
-    """Joins all videos into one using PyAV (av) to avoid external ffmpeg dependencies"""
-    if not video_paths:
-        print("[ERROR] No videos to concatenate")
-        return False
-    
-    import av
-    from pathlib import Path
-    
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    list_file = "media/video_list.txt"
-    
-    # Write list file using the format expected by av's concat demuxer
-    with open(list_file, 'w', encoding="utf-8") as f:
-        f.write("# Concat list\n")
-        for video_path in video_paths:
-            if os.path.exists(video_path):
-                abs_path = Path(video_path).resolve().as_posix()
-                f.write(f"file 'file:{abs_path}'\n")
-                
+def concatenate_videos(
+    video_paths: Sequence[str],
+    output_path: str | os.PathLike,
+    list_file: str | os.PathLike,
+) -> bool:
+    """Concatenate scene videos into one silent clip (FFmpeg, order preserved)."""
     try:
-        print(f"\n  Concatenating {len(video_paths)} videos using PyAV...")
-        input_container = av.open(list_file, options={"safe": "0"}, format="concat")
-        input_stream = input_container.streams.video[0]
-        
-        output_container = av.open(output_path, mode="w")
-        output_stream = output_container.add_stream(template=input_stream)
-        
-        for packet in input_container.demux(input_stream):
-            if packet.dts is None:
-                continue
-            packet.dts = None
-            packet.stream = output_stream
-            output_container.mux(packet)
-            
-        input_container.close()
-        output_container.close()
-        
-        if os.path.exists(list_file):
-            os.remove(list_file)
-            
-        print(f"[OK] Final video created: {output_path}")
-        return True
-    except Exception as e:
-        print(f"[ERROR] Error concatenating videos via PyAV: {e}")
-        if os.path.exists(list_file):
-            os.remove(list_file)
+        return concat_video(video_paths, output_path, list_file)
+    except FFmpegError as exc:
+        print(f"[ERROR] Video concatenation failed: {exc}")
         return False
 
 
-def merge_video_and_audio(video_path, audio_path, output_path):
-    """
-    Merges video and audio files into a single MP4 file using PyAV (av)
-    """
-    if not os.path.exists(video_path):
-        print(f"[ERROR] Video file not found: {video_path}")
-        return False
-    
-    if not os.path.exists(audio_path):
-        print(f"[ERROR] Audio file not found: {audio_path}")
-        return False
-    
-    import av
-    
+def merge_video_and_audio(
+    video_path: str | os.PathLike,
+    audio_path: str | os.PathLike,
+    output_path: str | os.PathLike,
+) -> bool:
+    """Mux video + narration into a browser-compatible faststart MP4 (FFmpeg)."""
     try:
-        print(f"\n{'='*80}")
-        print(f"MERGING VIDEO AND AUDIO USING PyAV")
-        print(f"{'='*80}")
-        print(f"Video: {video_path}")
-        print(f"Audio: {audio_path}")
-        print(f"Output: {output_path}\n")
-        
-        with av.open(video_path) as video_input, av.open(audio_path) as audio_input:
-            video_stream = video_input.streams.video[0]
-            audio_stream = audio_input.streams.audio[0]
-            
-            output_container = av.open(output_path, mode="w")
-            output_video_stream = output_container.add_stream(template=video_stream)
-            output_audio_stream = output_container.add_stream(template=audio_stream)
-            
-            for packet in video_input.demux(video_stream):
-                if packet.dts is None:
-                    continue
-                packet.stream = output_video_stream
-                output_container.mux(packet)
-                
-            for packet in audio_input.demux(audio_stream):
-                if packet.dts is None:
-                    continue
-                packet.stream = output_audio_stream
-                output_container.mux(packet)
-                
-            output_container.close()
-            
-        print(f"[OK] Final video with audio created: {output_path}\n")
-        return True
-    except Exception as e:
-        print(f"[ERROR] Error merging video and audio via PyAV: {e}")
+        return mux_video_audio(video_path, audio_path, output_path)
+    except FFmpegError as exc:
+        print(f"[ERROR] Merging video and audio failed: {exc}")
         return False

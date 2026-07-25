@@ -79,10 +79,21 @@ let elapsedInterval = null;
 
 // Theme toggle
 if (themeToggle) {
+    // Announce which theme the button switches to, not just "toggle theme".
+    const describeTheme = (theme) => {
+        themeToggle.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+        const target = theme === 'dark' ? 'light' : 'dark';
+        themeToggle.setAttribute('aria-label', `Switch to ${target} theme`);
+        themeToggle.setAttribute('title', `Switch to ${target} theme`);
+    };
+
+    describeTheme(document.documentElement.getAttribute('data-theme') || 'dark');
+
     themeToggle.addEventListener('click', () => {
         const root = document.documentElement;
         const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
         root.setAttribute('data-theme', next);
+        describeTheme(next);
         try {
             localStorage.setItem('p2l-theme', next);
         } catch (e) { /* ignore */ }
@@ -250,6 +261,14 @@ function updateProgressBar(progress, currentStepText = '') {
     const pct = Math.round(progress);
     progressFill.style.width = `${progress}%`;
     document.querySelector('.progress-percentage').textContent = `${pct}%`;
+
+    // Keep the progressbar role in sync so screen readers announce the value.
+    const progressBar = document.getElementById('progress-bar');
+    if (progressBar) {
+        progressBar.setAttribute('aria-valuenow', String(pct));
+        progressBar.setAttribute('aria-valuetext',
+            currentStepText ? `${pct}% — ${currentStepText}` : `${pct}%`);
+    }
 
     const miniFill = document.getElementById('mini-bar-fill');
     const miniText = document.getElementById('mini-progress-text');
@@ -459,18 +478,27 @@ const copyCodeBtn = document.getElementById('copy-code-btn');
 const resultManimCode = document.getElementById('result-manim-code');
 
 if (tabBtnVideo && tabBtnCode && showcaseFrameVideo && showcaseFrameCode) {
-    tabBtnVideo.addEventListener('click', () => {
-        tabBtnVideo.classList.add('active');
-        tabBtnCode.classList.remove('active');
-        showcaseFrameVideo.classList.remove('hidden');
-        showcaseFrameCode.classList.add('hidden');
-    });
+    // One switcher for both tabs so the .active class and aria-selected can
+    // never disagree about which panel is showing.
+    const selectShowcaseTab = (showCode) => {
+        tabBtnCode.classList.toggle('active', showCode);
+        tabBtnVideo.classList.toggle('active', !showCode);
+        tabBtnCode.setAttribute('aria-selected', showCode ? 'true' : 'false');
+        tabBtnVideo.setAttribute('aria-selected', showCode ? 'false' : 'true');
+        showcaseFrameCode.classList.toggle('hidden', !showCode);
+        showcaseFrameVideo.classList.toggle('hidden', showCode);
+    };
 
-    tabBtnCode.addEventListener('click', () => {
-        tabBtnCode.classList.add('active');
-        tabBtnVideo.classList.remove('active');
-        showcaseFrameCode.classList.remove('hidden');
-        showcaseFrameVideo.classList.add('hidden');
+    tabBtnVideo.addEventListener('click', () => selectShowcaseTab(false));
+    tabBtnCode.addEventListener('click', () => selectShowcaseTab(true));
+
+    // Left/right arrows move between tabs, as expected of a tablist.
+    document.querySelector('.cinema-tab-header')?.addEventListener('keydown', (e) => {
+        if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+        e.preventDefault();
+        const showCode = !tabBtnCode.classList.contains('active');
+        selectShowcaseTab(showCode);
+        (showCode ? tabBtnCode : tabBtnVideo).focus();
     });
 }
 
@@ -846,11 +874,18 @@ function handleDragOver(e) {
         e.preventDefault();
     }
     e.dataTransfer.dropEffect = 'move';
+    // Show the drop target so reordering isn't a blind guess.
+    if (this !== dragSourceElement) {
+        document.querySelectorAll('.scene-card.drag-over')
+            .forEach(card => card.classList.remove('drag-over'));
+        this.classList.add('drag-over');
+    }
     return false;
 }
 
 function handleDrop(e) {
     e.stopPropagation();
+    this.classList.remove('drag-over');
     if (dragSourceElement !== this) {
         const srcIndex = parseInt(e.dataTransfer.getData('text/plain'));
         const destIndex = parseInt(this.dataset.index);
@@ -866,7 +901,7 @@ function handleDrop(e) {
 function handleDragEnd(e) {
     this.classList.remove('dragging');
     const cards = document.querySelectorAll('.scene-card');
-    cards.forEach(card => card.classList.remove('dragging'));
+    cards.forEach(card => card.classList.remove('dragging', 'drag-over'));
 }
 
 if (addSceneBtn) {
@@ -1323,17 +1358,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 height = canvas.height = window.innerHeight;
             });
 
-            const particles = Array.from({ length: 45 }, () => ({
+            const particles = Array.from({ length: 50 }, () => ({
                 x: Math.random() * width,
                 y: Math.random() * height,
-                vx: (Math.random() - 0.5) * 0.4,
-                vy: (Math.random() - 0.5) * 0.4,
-                radius: Math.random() * 1.5 + 0.8,
-                alpha: Math.random() * 0.5 + 0.2
+                vx: (Math.random() - 0.5) * 0.3,
+                vy: (Math.random() - 0.5) * 0.3,
+                radius: Math.random() * 1.6 + 0.6,
+                alpha: Math.random() * 0.45 + 0.2
             }));
 
             function drawParticles() {
                 ctx.clearRect(0, 0, width, height);
+
+                // Subtle Interactive Mouse Ambient Light Aura
+                if (mouseX && mouseY) {
+                    const mouseGrad = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, 380);
+                    mouseGrad.addColorStop(0, 'rgba(99, 102, 241, 0.08)');
+                    mouseGrad.addColorStop(0.5, 'rgba(168, 85, 247, 0.03)');
+                    mouseGrad.addColorStop(1, 'transparent');
+                    ctx.fillStyle = mouseGrad;
+                    ctx.fillRect(0, 0, width, height);
+                }
 
                 for (let i = 0; i < particles.length; i++) {
                     const p = particles[i];
@@ -1357,10 +1402,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         const dist = Math.sqrt(dx * dx + dy * dy);
 
                         if (dist < 130) {
+                            const lineAlpha = (1 - dist / 130) * 0.15;
                             ctx.beginPath();
                             ctx.moveTo(p.x, p.y);
                             ctx.lineTo(p2.x, p2.y);
-                            ctx.strokeStyle = `rgba(129, 140, 248, ${0.12 * (1 - dist / 130)})`;
+                            ctx.strokeStyle = `rgba(129, 140, 248, ${lineAlpha})`;
                             ctx.lineWidth = 0.8;
                             ctx.stroke();
                         }
@@ -1370,5 +1416,219 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             requestAnimationFrame(drawParticles);
         }
+    })();
+
+    /* ============================================================
+       Glassmorphic Custom Dropdown Initializer
+       ============================================================ */
+    (function initGlassDropdowns() {
+        const selectElements = document.querySelectorAll('select.form-select');
+        let seq = 0;
+
+        // Each dropdown registers its own close(); closing "all" then means
+        // resetting every instance's aria state, not just stripping a class.
+        const glassClosers = [];
+
+        function closeAllDropdowns() {
+            glassClosers.forEach(fn => fn());
+            document.querySelectorAll('.glass-open').forEach(el => el.classList.remove('glass-open'));
+        }
+
+        selectElements.forEach(select => {
+            const wrapper = select.closest('.select-wrapper');
+            if (!wrapper || wrapper.querySelector('.custom-glass-dropdown')) return;
+
+            // Hide native select visually while keeping it in DOM as the source
+            // of truth for the form payload.
+            select.style.display = 'none';
+
+            const dropdown = document.createElement('div');
+            dropdown.className = 'custom-glass-dropdown';
+
+            const trigger = document.createElement('button');
+            trigger.type = 'button';
+            trigger.className = 'custom-glass-trigger';
+            trigger.setAttribute('aria-haspopup', 'listbox');
+            trigger.setAttribute('aria-expanded', 'false');
+
+            // The visible <label for="..."> points at the now-hidden native
+            // select, so re-hang it on the control that actually takes focus.
+            const nativeLabel = select.id
+                ? document.querySelector(`label[for="${select.id}"]`)
+                : null;
+            if (nativeLabel) {
+                if (!nativeLabel.id) nativeLabel.id = `${select.id}-label`;
+                trigger.setAttribute('aria-labelledby', nativeLabel.id);
+            }
+
+            const selectedOption = select.options[select.selectedIndex] || select.options[0];
+            const triggerText = document.createElement('span');
+            triggerText.className = 'glass-trigger-text';
+            triggerText.textContent = selectedOption ? selectedOption.textContent : '';
+
+            const chevron = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            chevron.setAttribute('class', 'glass-chevron');
+            chevron.setAttribute('viewBox', '0 0 24 24');
+            chevron.setAttribute('fill', 'none');
+            chevron.setAttribute('stroke', 'currentColor');
+            chevron.setAttribute('stroke-width', '2.5');
+            chevron.setAttribute('aria-hidden', 'true');
+            chevron.innerHTML = '<polyline points="6 9 12 15 18 9"></polyline>';
+
+            trigger.appendChild(triggerText);
+            trigger.appendChild(chevron);
+
+            const menu = document.createElement('div');
+            menu.className = 'custom-glass-menu';
+            menu.id = `glass-menu-${select.id || ++seq}`;
+            menu.setAttribute('role', 'listbox');
+            if (nativeLabel && nativeLabel.id) {
+                menu.setAttribute('aria-labelledby', nativeLabel.id);
+            }
+            trigger.setAttribute('aria-controls', menu.id);
+
+            const optionEls = [];
+
+            const commit = (idx) => {
+                const opt = select.options[idx];
+                if (!opt) return;
+                select.selectedIndex = idx;
+                triggerText.textContent = opt.textContent;
+                optionEls.forEach((el, i) => {
+                    el.classList.toggle('selected', i === idx);
+                    el.setAttribute('aria-selected', i === idx ? 'true' : 'false');
+                });
+                close();
+                trigger.focus();
+                // Dispatch native change event so form & app listeners trigger
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            };
+
+            Array.from(select.options).forEach((opt, idx) => {
+                const optEl = document.createElement('div');
+                const isSelected = idx === select.selectedIndex;
+                optEl.className = 'custom-glass-option' + (isSelected ? ' selected' : '');
+                optEl.id = `${menu.id}-opt-${idx}`;
+                optEl.setAttribute('role', 'option');
+                optEl.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+
+                const labelSpan = document.createElement('span');
+                labelSpan.textContent = opt.textContent;
+                optEl.appendChild(labelSpan);
+
+                const checkSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                checkSvg.setAttribute('class', 'glass-option-check');
+                checkSvg.setAttribute('viewBox', '0 0 24 24');
+                checkSvg.setAttribute('fill', 'none');
+                checkSvg.setAttribute('stroke', 'currentColor');
+                checkSvg.setAttribute('stroke-width', '3');
+                checkSvg.setAttribute('aria-hidden', 'true');
+                checkSvg.innerHTML = '<polyline points="20 6 9 17 4 12"></polyline>';
+                optEl.appendChild(checkSvg);
+
+                optEl.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    commit(idx);
+                });
+
+                optionEls.push(optEl);
+                menu.appendChild(optEl);
+            });
+
+            // Which option the keyboard is pointing at while the menu is open.
+            let activeIdx = Math.max(select.selectedIndex, 0);
+
+            const setActive = (idx) => {
+                activeIdx = Math.min(Math.max(idx, 0), optionEls.length - 1);
+                optionEls.forEach((el, i) => el.classList.toggle('active', i === activeIdx));
+                const el = optionEls[activeIdx];
+                if (!el) return;
+                menu.setAttribute('aria-activedescendant', el.id);
+                el.scrollIntoView({ block: 'nearest' });
+            };
+
+            const open = () => {
+                closeAllDropdowns();
+                dropdown.classList.add('open');
+                trigger.setAttribute('aria-expanded', 'true');
+                wrapper.classList.add('glass-open');
+                const formGroup = wrapper.closest('.form-group');
+                if (formGroup) formGroup.classList.add('glass-open');
+                const controlsGrid = wrapper.closest('.controls-grid, .advanced-grid');
+                if (controlsGrid) controlsGrid.classList.add('glass-open');
+                setActive(select.selectedIndex);
+            };
+
+            const close = () => {
+                dropdown.classList.remove('open');
+                trigger.setAttribute('aria-expanded', 'false');
+                menu.removeAttribute('aria-activedescendant');
+                optionEls.forEach(el => el.classList.remove('active'));
+                // Drop the z-index escape hatches, or a closed dropdown keeps
+                // its ancestors stacked above the rest of the page.
+                wrapper.classList.remove('glass-open');
+                wrapper.closest('.form-group')?.classList.remove('glass-open');
+                wrapper.closest('.controls-grid, .advanced-grid')?.classList.remove('glass-open');
+            };
+
+            trigger.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (dropdown.classList.contains('open')) {
+                    close();
+                } else {
+                    open();
+                }
+            });
+
+            trigger.addEventListener('keydown', (e) => {
+                const isOpen = dropdown.classList.contains('open');
+
+                switch (e.key) {
+                    case 'ArrowDown':
+                    case 'ArrowUp':
+                        e.preventDefault();
+                        if (!isOpen) { open(); return; }
+                        setActive(activeIdx + (e.key === 'ArrowDown' ? 1 : -1));
+                        return;
+                    case 'Home':
+                        if (!isOpen) return;
+                        e.preventDefault();
+                        setActive(0);
+                        return;
+                    case 'End':
+                        if (!isOpen) return;
+                        e.preventDefault();
+                        setActive(optionEls.length - 1);
+                        return;
+                    case 'Enter':
+                    case ' ':
+                        e.preventDefault();
+                        if (isOpen) { commit(activeIdx); } else { open(); }
+                        return;
+                    case 'Escape':
+                        if (!isOpen) return;
+                        e.preventDefault();
+                        close();
+                        return;
+                    case 'Tab':
+                        // Let focus move on, but don't leave a menu hanging open.
+                        if (isOpen) close();
+                        return;
+                    default:
+                        return;
+                }
+            });
+
+            dropdown.appendChild(trigger);
+            dropdown.appendChild(menu);
+            wrapper.appendChild(dropdown);
+
+            // Registered so closeAllDropdowns can reset aria state too, not just
+            // strip the .open class.
+            glassClosers.push(close);
+        });
+
+        // Close custom glass dropdowns on click outside
+        document.addEventListener('click', closeAllDropdowns);
     })();
 });

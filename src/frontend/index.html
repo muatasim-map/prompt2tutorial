@@ -33,20 +33,22 @@
 </head>
 
 <body>
+    <a href="#studio" class="skip-link">Skip to the studio</a>
+
     <!-- Custom Dual Interactive Cursor -->
-    <div id="cursor-dot"></div>
-    <div id="cursor-ring"></div>
+    <div id="cursor-dot" aria-hidden="true"></div>
+    <div id="cursor-ring" aria-hidden="true"></div>
     <!-- Ambient Background Mesh Glow & Interactive Particle Canvas -->
-    <div class="ambient-glow"></div>
-    <div class="background-grid"></div>
-    <canvas id="particle-canvas" class="particle-canvas"></canvas>
+    <div class="ambient-glow" aria-hidden="true"></div>
+    <div class="background-grid" aria-hidden="true"></div>
+    <canvas id="particle-canvas" class="particle-canvas" aria-hidden="true"></canvas>
 
     <!-- Header -->
     <header class="header">
         <div class="container header-container">
             <div class="logo-wrapper">
                 <div class="logo-icon-v2">
-                    <svg width="28" height="28" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <svg aria-hidden="true" width="28" height="28" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <path d="M20 4L34 12V28L20 36L6 28V12L20 4Z" fill="url(#p2l-grad-bg)" stroke="url(#p2l-grad-border)" stroke-width="1.8"/>
                         <polygon points="16 13 28 20 16 27 16 13" fill="url(#p2l-play-grad)"/>
                         <circle cx="20" cy="4" r="2" fill="#c084fc"/>
@@ -83,11 +85,11 @@
                 <a href="#studio" class="nav-link">Studio</a>
                 <a href="#features" class="nav-link">Features</a>
                 <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Toggle color theme" title="Toggle Theme">
-                    <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                    <svg aria-hidden="true" class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
                         <circle cx="12" cy="12" r="4" />
                         <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
                     </svg>
-                    <svg class="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg aria-hidden="true" class="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
                     </svg>
                 </button>
@@ -101,7 +103,7 @@
             <!-- Hero Banner Text -->
             <div class="hero-header text-center">
                 <div class="eyebrow-badge">
-                    <span class="badge-sparkle">✨</span>
+                    <span class="badge-sparkle" aria-hidden="true">✨</span>
                     <span>AI Educational Video Generator</span>
                     <span class="badge-divider">•</span>
                     <span class="badge-highlight">v2.4 Manim Engine</span>
@@ -117,25 +119,25 @@
                 <!-- Investor Metric Telemetry Bar -->
                 <div class="hero-metrics-bar">
                     <div class="metric-item">
-                        <span class="metric-icon">⚡</span>
+                        <span class="metric-icon" aria-hidden="true">⚡</span>
                         <span class="metric-value">1.2s</span>
                         <span class="metric-label">Pipeline Latency</span>
                     </div>
                     <div class="metric-divider"></div>
                     <div class="metric-item">
-                        <span class="metric-icon">🎬</span>
+                        <span class="metric-icon" aria-hidden="true">🎬</span>
                         <span class="metric-value">60 FPS</span>
                         <span class="metric-label">1080p Manim Render</span>
                     </div>
                     <div class="metric-divider"></div>
                     <div class="metric-item">
-                        <span class="metric-icon">🧠</span>
+                        <span class="metric-icon" aria-hidden="true">🧠</span>
                         <span class="metric-value">99.4%</span>
                         <span class="metric-label">Code Accuracy</span>
                     </div>
                     <div class="metric-divider"></div>
                     <div class="metric-item">
-                        <span class="metric-icon">💰</span>
+                        <span class="metric-icon" aria-hidden="true">💰</span>
                         <span class="metric-value">$0.0018</span>
                         <span class="metric-label">Avg Cost / Lesson</span>
                     </div>
@@ -150,7 +152,7 @@
                     <!-- Topic Input Group -->
                     <div class="form-group topic-group">
                         <label for="topic-input" class="form-label">
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <circle cx="12" cy="12" r="10"></circle>
                                 <line x1="12" y1="8" x2="12" y2="12"></line>
                                 <line x1="12" y1="16" x2="12.01" y2="16"></line>
@@ -192,7 +194,7 @@
                     <div class="controls-grid">
                         <div class="form-group">
                             <label for="llm-select" class="form-label">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <path d="M12 2a10 10 0 1 0 10 10H12V2z"/>
                                     <path d="M12 12L2.1 12a10 10 0 0 0 17.8 5.9"/>
                                 </svg>
@@ -214,7 +216,7 @@
 
                         <div class="form-group">
                             <label for="duration-select" class="form-label">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <circle cx="12" cy="12" r="10"/>
                                     <polyline points="12 6 12 12 16 14"/>
                                 </svg>
@@ -231,7 +233,7 @@
 
                         <div class="form-group toggle-group">
                             <label for="tts-toggle" class="form-label">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <path d="M11 5L6 9H2v6h4l5 4V5z"/>
                                     <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
                                 </svg>
@@ -249,20 +251,21 @@
 
                     <!-- Advanced TTS Settings Accordion -->
                     <div class="advanced-accordion glass-panel" id="advanced-accordion">
-                        <button type="button" class="accordion-toggle" id="advanced-toggle">
+                        <button type="button" class="accordion-toggle" id="advanced-toggle"
+                            aria-expanded="false" aria-controls="advanced-content">
                             <div class="accordion-title">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <circle cx="12" cy="12" r="3"/>
                                     <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
                                 </svg>
                                 <span>Advanced Audio & Cache Engine Settings</span>
                             </div>
-                            <svg class="accordion-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <svg aria-hidden="true" class="accordion-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <polyline points="6 9 12 15 18 9"></polyline>
                             </svg>
                         </button>
                         
-                        <div class="accordion-content" id="advanced-content">
+                        <div class="accordion-content" id="advanced-content" role="region" aria-labelledby="advanced-toggle">
                             <div class="accordion-inner">
                                 <div class="advanced-grid">
                                     <div class="form-group">
@@ -316,13 +319,13 @@
                     <!-- Submit Button -->
                     <button type="submit" class="btn-primary" id="generate-btn">
                         <span class="btn-icon">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <circle cx="12" cy="12" r="10"/>
                                 <polygon points="10 8 16 12 10 16 10 8"/>
                             </svg>
                         </span>
                         <span class="btn-text">Generate Animated Lesson</span>
-                        <svg class="btn-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <svg aria-hidden="true" class="btn-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                             <line x1="5" y1="12" x2="19" y2="12"></line>
                             <polyline points="12 5 19 12 12 19"></polyline>
                         </svg>
@@ -333,7 +336,7 @@
                 <div id="review-section" class="review-section hidden">
                     <div class="review-header-bar">
                         <div class="review-title-group">
-                            <span class="review-icon">🎬</span>
+                            <span class="review-icon" aria-hidden="true">🎬</span>
                             <div>
                                 <h3 class="review-title">Lesson Storyboard Studio</h3>
                                 <p class="review-subtitle">Review, edit, and fine-tune narration &amp; animations before video compilation.</p>
@@ -350,14 +353,14 @@
                     
                     <div class="review-actions-bar">
                         <button type="button" class="btn-secondary" id="add-scene-btn">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <line x1="12" y1="5" x2="12" y2="19"></line>
                                 <line x1="5" y1="12" x2="19" y2="12"></line>
                             </svg>
                             Add New Scene
                         </button>
                         <button type="button" class="btn-primary btn-approve" id="approve-btn">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                                 <polyline points="20 6 9 17 4 12"></polyline>
                             </svg>
                             Approve &amp; Compile Video
@@ -381,7 +384,9 @@
                         </div>
                     </div>
 
-                    <div class="progress-bar-container">
+                    <div class="progress-bar-container" role="progressbar" id="progress-bar"
+                        aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
+                        aria-label="Video generation progress">
                         <div class="progress-fill" id="progress-fill"></div>
                     </div>
 
@@ -421,7 +426,7 @@
                     <div class="terminal-log-window">
                         <div class="terminal-header">
                             <div class="terminal-header-left">
-                                <div class="terminal-dots">
+                                <div class="terminal-dots" aria-hidden="true">
                                     <span class="dot dot-red"></span>
                                     <span class="dot dot-amber"></span>
                                     <span class="dot dot-green"></span>
@@ -442,7 +447,7 @@
                                 <button type="button" class="terminal-btn btn-highlight" id="copy-log-btn" title="Copy Log to Clipboard">COPY LOG</button>
                             </div>
                         </div>
-                        <div class="progress-log" id="progress-log"></div>
+                        <div class="progress-log" id="progress-log" role="log" aria-live="polite" aria-relevant="additions" tabindex="0"></div>
                         <div id="terminal-progress-bar" class="terminal-progress-footer">
                             <span class="mini-progress-label">[PROGRESS]</span>
                             <div class="mini-bar-track">
@@ -462,20 +467,24 @@
                     </div>
 
                     <!-- Cinema Showcase Header & Inspector Tabs -->
-                    <div class="cinema-tab-header">
-                        <button type="button" class="cinema-tab-btn active" id="tab-btn-video">
-                            <span>🎬 Video Stream (1080p 60FPS)</span>
+                    <div class="cinema-tab-header" role="tablist" aria-label="Result inspector">
+                        <button type="button" class="cinema-tab-btn active" id="tab-btn-video"
+                            role="tab" aria-selected="true" aria-controls="showcase-frame-video">
+                            <span><span aria-hidden="true">🎬</span> Video Stream (1080p 60FPS)</span>
                         </button>
-                        <button type="button" class="cinema-tab-btn" id="tab-btn-code">
-                            <span>🐍 Manim Python Code Inspector</span>
+                        <button type="button" class="cinema-tab-btn" id="tab-btn-code"
+                            role="tab" aria-selected="false" aria-controls="showcase-frame-code">
+                            <span><span aria-hidden="true">🐍</span> Manim Python Code Inspector</span>
                         </button>
                     </div>
 
-                    <div class="video-showcase-frame" id="showcase-frame-video">
+                    <div class="video-showcase-frame" id="showcase-frame-video"
+                        role="tabpanel" aria-labelledby="tab-btn-video" tabindex="0">
                         <video id="result-video" class="result-video" controls poster=""></video>
                     </div>
 
-                    <div class="code-showcase-frame hidden" id="showcase-frame-code">
+                    <div class="code-showcase-frame hidden" id="showcase-frame-code"
+                        role="tabpanel" aria-labelledby="tab-btn-code" tabindex="0">
                         <div class="code-header">
                             <span class="code-filename">generated_manim_scene.py</span>
                             <button type="button" class="code-copy-btn" id="copy-code-btn">Copy Python Code</button>
@@ -484,16 +493,16 @@
                     </div>
 
                     <div class="video-metadata-bar" id="video-metadata-bar">
-                        <span class="meta-badge"><span class="meta-icon">⏱️</span> <span id="meta-duration">--s</span></span>
-                        <span class="meta-badge"><span class="meta-icon">📦</span> <span id="meta-size">-- MB</span></span>
-                        <span class="meta-badge"><span class="meta-icon">🧠</span> <span id="meta-model">gemini-3.5-flash-lite</span></span>
-                        <span class="meta-badge meta-cost-badge" id="meta-cost-badge" title="Click to view ASCII Cost Audit Console (Shift + A)"><span class="meta-icon">💰</span> <span id="meta-cost">$0.0000</span> <span class="hotkey-pill">Shift+A</span></span>
-                        <span class="meta-badge"><span class="meta-icon">🎬</span> 1080p Manim CE</span>
+                        <span class="meta-badge"><span class="meta-icon" aria-hidden="true">⏱️</span> <span id="meta-duration">--s</span></span>
+                        <span class="meta-badge"><span class="meta-icon" aria-hidden="true">📦</span> <span id="meta-size">-- MB</span></span>
+                        <span class="meta-badge"><span class="meta-icon" aria-hidden="true">🧠</span> <span id="meta-model">gemini-3.5-flash-lite</span></span>
+                        <span class="meta-badge meta-cost-badge" id="meta-cost-badge" title="Click to view ASCII Cost Audit Console (Shift + A)"><span class="meta-icon" aria-hidden="true">💰</span> <span id="meta-cost">$0.0000</span> <span class="hotkey-pill">Shift+A</span></span>
+                        <span class="meta-badge"><span class="meta-icon" aria-hidden="true">🎬</span> 1080p Manim CE</span>
                     </div>
 
                     <div class="result-actions">
                         <a id="download-btn" class="btn-primary btn-download" download>
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                                 <polyline points="7 10 12 15 17 10" />
                                 <line x1="12" y1="15" x2="12" y2="3" />
@@ -501,7 +510,7 @@
                             Download MP4 Video
                         </a>
                         <button type="button" class="btn-secondary" onclick="location.reload()">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <polyline points="23 4 23 10 17 10" />
                                 <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
                             </svg>
@@ -529,7 +538,7 @@
             <div class="bento-grid">
                 <div class="bento-card">
                     <div class="bento-icon-wrapper icon-amber">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="3" y="3" width="7" height="7" rx="1.5"></rect>
                             <rect x="14" y="3" width="7" height="7" rx="1.5"></rect>
                             <rect x="14" y="14" width="7" height="7" rx="1.5"></rect>
@@ -542,7 +551,7 @@
 
                 <div class="bento-card">
                     <div class="bento-icon-wrapper icon-purple">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M12 3v18"></path>
                             <path d="m5 7 14 10"></path>
                             <path d="M5 17 19 7"></path>
@@ -554,7 +563,7 @@
 
                 <div class="bento-card">
                     <div class="bento-icon-wrapper icon-emerald">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M7 16V4m0 0L3 8m4-4l4 4"></path>
                             <path d="M17 8v12m0 0l4-4m-4 4l-4-4"></path>
                         </svg>
@@ -565,7 +574,7 @@
 
                 <div class="bento-card">
                     <div class="bento-icon-wrapper icon-indigo">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="3" y="3" width="18" height="18" rx="2"></rect>
                             <path d="M3 9h18"></path>
                             <path d="M9 21V9"></path>
@@ -577,7 +586,7 @@
 
                 <div class="bento-card">
                     <div class="bento-icon-wrapper icon-amber-gold">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#eab308" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#eab308" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
                             <polyline points="2 17 12 22 22 17"></polyline>
                             <polyline points="2 12 12 17 22 12"></polyline>
@@ -589,7 +598,7 @@
 
                 <div class="bento-card">
                     <div class="bento-icon-wrapper icon-cyan">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#06b6d4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <circle cx="12" cy="12" r="10"></circle>
                             <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path>
                             <path d="M2 12h20"></path>
@@ -624,16 +633,18 @@
             </div>
         </div>
     <!-- Cyberpunk ASCII TUI Analytics Modal -->
-    <div id="ascii-tui-modal" class="ascii-tui-modal hidden">
+    <div id="ascii-tui-modal" class="ascii-tui-modal hidden" role="dialog" aria-modal="true"
+        aria-labelledby="ascii-modal-title">
         <div class="ascii-modal-overlay" id="ascii-modal-overlay"></div>
         <div class="ascii-terminal-window">
             <div class="ascii-terminal-header">
                 <div class="terminal-dots">
-                    <span class="dot dot-red" id="ascii-modal-close-btn" style="cursor: pointer;"></span>
-                    <span class="dot dot-yellow"></span>
-                    <span class="dot dot-green"></span>
+                    <button type="button" class="dot dot-red dot-close" id="ascii-modal-close-btn"
+                        aria-label="Close cost audit console"></button>
+                    <span class="dot dot-yellow" aria-hidden="true"></span>
+                    <span class="dot dot-green" aria-hidden="true"></span>
                 </div>
-                <span class="ascii-terminal-title">$ prompt2learn --analytics --cost-audit</span>
+                <span class="ascii-terminal-title" id="ascii-modal-title">$ prompt2learn --analytics --cost-audit</span>
                 <span class="ascii-hotkey-badge">ESC / Shift+A</span>
             </div>
             <div class="ascii-terminal-body">

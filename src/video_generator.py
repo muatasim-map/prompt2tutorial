@@ -28,6 +28,7 @@ from dotenv import load_dotenv
 import animations
 import domain_guidance
 import manim_generator
+import scene_checks
 import storyboard as storyboard_mod
 import visual_qa
 from app_build import BUILD_ID as APP_BUILD_ID
@@ -608,6 +609,84 @@ def _is_timeout_error(compile_error: Optional[str]) -> bool:
     return bool(compile_error) and "Timeout: compilation exceeded" in compile_error
 
 
+def _apply_motion_gate(
+    *, ws, service, provider, client, job_id, index, total,
+    code: str, class_name: str, storyboard_entry: Optional[dict],
+) -> tuple:
+    """Spend at most one LLM call turning a delete-and-rebuild scene into a transform.
+
+    Returns ``(code, class_name)`` — the revised pair when the revision succeeded
+    and still looks sane, otherwise the originals untouched. This runs BEFORE the
+    compile loop, so a revision that breaks the code is still caught and repaired
+    by the existing retry logic.
+
+    Never raises: a failure here must not cost a scene that already works.
+    """
+    try:
+        facts = scene_checks.analyze_scene_code(code)
+        if not scene_checks.needs_motion_revision(facts):
+            return code, class_name
+
+        discarded = ", ".join(facts.discarded_names[:3]) or f"{facts.fadeout_count} objects"
+        update_job_status(
+            job_id, meta={"scene": index, "scene_stage": "motion_gate"},
+            message=(f"[WARN] [MANIM] Scene {index}/{total}: no transform found "
+                     f"(discards: {discarded}) — requesting one motion revision"),
+        )
+
+        revised = manim_generator.revise_manim_code_for_motion(
+            service=service, original_code=code,
+            feedback=scene_checks.build_motion_feedback(facts),
+            class_name=class_name, provider=provider, client=client,
+            storyboard_entry=storyboard_entry,
+            status=_make_llm_status(job_id),
+        )
+        if not revised or not revised.get("content"):
+            update_job_status(
+                job_id, message=(f"[INFO] [MANIM] Scene {index}/{total}: motion revision "
+                                 f"unavailable, keeping original"),
+            )
+            return code, class_name
+
+        new_code = revised["content"]
+        new_facts = scene_checks.analyze_scene_code(new_code)
+
+        # Only accept a revision that actually parses AND actually introduced a
+        # morph. The model is explicitly allowed to decline (return unchanged),
+        # and a "revision" that just deleted animation is worse than the original.
+        if new_facts.parse_error or not new_facts.uses_any_morph:
+            update_job_status(
+                job_id, message=(f"[INFO] [MANIM] Scene {index}/{total}: revision added no "
+                                 f"transform, keeping original"),
+            )
+            return code, class_name
+
+        if new_facts.play_call_count < max(1, facts.play_call_count - 1):
+            update_job_status(
+                job_id, message=(f"[WARN] [MANIM] Scene {index}/{total}: revision dropped "
+                                 f"animation beats ({facts.play_call_count}->"
+                                 f"{new_facts.play_call_count}), keeping original"),
+            )
+            return code, class_name
+
+        update_job_status(
+            job_id, meta={"scene": index, "scene_stage": "motion_revised"},
+            message=(f"[OK] [MANIM] Scene {index}/{total}: motion revision applied "
+                     f"({'+'.join(new_facts.morph_verbs_used)})"),
+        )
+        _write_job_log(job_id, "motion_gate", {
+            "scene": index,
+            "discarded_names": facts.discarded_names,
+            "fadeout_count": facts.fadeout_count,
+            "morph_verbs_after": new_facts.morph_verbs_used,
+        })
+        return new_code, revised.get("class_name", class_name)
+
+    except Exception as exc:  # pragma: no cover - defensive
+        print(f"[MOTION] gate skipped for scene {index}: {exc}")
+        return code, class_name
+
+
 def _domain_routing_audit(
     index, storyboard_entry, scene, audio_duration,
     previous_context, global_style, ledger_summary,
@@ -746,6 +825,19 @@ def _generate_and_compile(
     update_job_status(
         job_id, meta={"scene": index, "scene_stage": "validated"},
         message=f"[OK] [MANIM] Scene {index}/{total}: Code validated (class: {current_class})",
+    )
+
+    # --- Motion gate (static, pre-render) --------------------------------- #
+    # The generation prompt asks at length for objects to be transformed rather
+    # than deleted and rebuilt, but measured output ignores it in ~60% of
+    # scenes. This turns that preference into a deterministic check and spends
+    # AT MOST ONE extra LLM call on it. Purely additive: any failure here
+    # leaves the original (already valid) code untouched.
+    current_code, current_class = _apply_motion_gate(
+        ws=ws, service=service, provider=provider, client=client,
+        job_id=job_id, index=index, total=total,
+        code=current_code, class_name=current_class,
+        storyboard_entry=storyboard_entry,
     )
 
     # Hard wall-clock ceiling for this scene's whole compile+repair loop,

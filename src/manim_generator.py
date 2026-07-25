@@ -1189,6 +1189,80 @@ def generate_manim_code(
         }
 
 
+_REVISE_SYSTEM = (
+    "You are an expert Manim Community Edition (v0.19.1) animator performing a "
+    "TARGETED revision on code that already compiles and already works. You make "
+    "the one requested improvement and change nothing else — same class name, "
+    "same duration, same beats, same teaching. You never rewrite the scene, never "
+    "simplify it, and never reduce it to a static diagram. If the requested change "
+    "genuinely does not apply, you return the code unchanged. Always respond in "
+    "valid JSON format."
+)
+
+
+def revise_manim_code_for_motion(
+    service: LLMService,
+    original_code: str,
+    feedback: str,
+    class_name: str,
+    provider: str,
+    client: Any = None,
+    storyboard_entry: Optional[dict] = None,
+    status: StatusCallback = None,
+) -> Optional[dict]:
+    """Apply ONE targeted motion revision to code that already compiles.
+
+    This is deliberately NOT :func:`fix_manim_code`: there is no traceback and
+    nothing is broken. ``feedback`` comes from :mod:`scene_checks` and names the
+    specific objects that were discarded instead of transformed.
+
+    Returns ``{'content': str, 'class_name': str}``, or ``None`` if the revision
+    failed — in which case the caller MUST keep the original code.
+    """
+    intent = ""
+    if storyboard_entry:
+        metaphor = storyboard_entry.get("visual_metaphor") or ""
+        motion = storyboard_entry.get("primary_motion") or ""
+        transformations = ", ".join(storyboard_entry.get("transformations") or [])
+        bits = [b for b in (
+            f"Visual metaphor: {metaphor}" if metaphor else "",
+            f"Primary motion: {motion}" if motion else "",
+            f"Intended transformations: {transformations}" if transformations else "",
+        ) if b]
+        if bits:
+            intent = "\nTHIS SCENE'S INTENT (preserve it):\n- " + "\n- ".join(bits) + "\n"
+
+    prompt = f"""{feedback}
+{intent}
+CURRENT CODE (compiles correctly — do not break it):
+```python
+{original_code}
+```
+
+Return the full revised scene. Keep the class name `{class_name}`. Change only
+what the revision above asks for."""
+
+    try:
+        result = service.generate(
+            role="repair",
+            system=_REVISE_SYSTEM,
+            prompt=prompt,
+            provider=provider,
+            client=client,
+            response_schema=ManimCode,
+        )
+    except LLMError as exc:
+        print(f"[MOTION] Revision request failed ({exc.category}): {exc}")
+        return None
+
+    try:
+        code: ManimCode = parse_manim_code_from_text(result.text)
+        return {"content": code.content, "class_name": code.class_name}
+    except ScriptValidationError as exc:
+        print(f"[MOTION] Revision response invalid: {exc}")
+        return None
+
+
 def fix_manim_code(
     service: LLMService,
     original_code: str,

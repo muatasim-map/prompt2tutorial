@@ -107,11 +107,23 @@ def continue_video():
 def get_progress(job_id):
     """Get video generation progress"""
     job = get_job_status(job_id)
-    
+
     if not job:
         return jsonify({'error': 'Job not found'}), 404
-    
-    return jsonify(job)
+
+    # The activity feed is append-only server-side; a client passes the highest
+    # seq it has already rendered so each poll returns only what is new. Without
+    # ?since= the whole (bounded) backlog comes back, which is what a page
+    # reload or a late-joining client needs.
+    payload = dict(job)
+    feed = payload.get('messages') or []
+    since = request.args.get('since', type=int)
+    if since is not None:
+        feed = [m for m in feed if m.get('seq', 0) > since]
+    payload['messages'] = feed
+    payload['message_seq'] = job.get('message_seq', 0)
+
+    return jsonify(payload)
 
 
 @app.route('/media/<path:filename>')

@@ -401,7 +401,16 @@ class VisualConfig:
     visual_qa_enabled: bool = True
     global_style: str = DEFAULT_GLOBAL_VISUAL_STYLE
     manim_quality: str = "low"  # low -> -ql/480p15, high -> -qh/1080p60
-    frames_per_scene: int = 3
+    # Frames sampled per scene for QA. This is the RESOLUTION of every temporal
+    # measurement downstream: static-run length is counted in steps of
+    # duration/frames_per_scene, so at 3 frames a "trailing static run" could
+    # only ever be 0, 1/3 or 2/3 of the clip — measured across 13 benchmark runs
+    # it returned exactly 0.67 on 12 of 16 scenes, which read as a precise
+    # finding but was quantisation. 12 gives sub-second precision on a ~9s
+    # scene, and also makes the all-frames-blank test meaningfully harder to
+    # pass by luck (a fully blank scene shipped undetected at 3).
+    # Cost is a few extra FFmpeg stills per scene against ~40s of compile.
+    frames_per_scene: int = 12
     # QA heuristic thresholds (frame brightness is 0-255).
     # NOTE: Manim scenes are dark by default, so "blank" is judged primarily by
     # how little *content* a frame has, not by absolute brightness.
@@ -410,12 +419,32 @@ class VisualConfig:
     min_stddev: float = 1.5
     edge_content_ratio: float = 0.020
     near_identical_mae: float = 4.0
+    # Retained for the first-vs-last "no meaningful change" test, which compares
+    # two deliberately distant frames where a whole-canvas mean still works.
     min_scene_change_mae: float = 2.0
+    # Motion floor for frozen-passage detection, as a fraction of VISIBLE
+    # CONTENT that changed between consecutive samples (see
+    # visual_qa.motion_between). Calibrated on 77 benchmark scenes: the old
+    # whole-canvas MAE test flagged 84% of them as containing a long frozen
+    # run, this flags 10%, and spot-checks confirm the 74-point difference was
+    # false positives on sparse-but-animating frames.
+    min_scene_motion: float = 0.05
     # Longest frozen tail tolerated before a scene is regenerated with more
     # visual beats instead of shipping a still frame.
     max_tail_pad_seconds: float = 0.75
     # A frozen stretch longer than this anywhere in a scene is flagged.
     max_static_run_seconds: float = 3.0
+    # Scenes compiled concurrently. Measured over 13 benchmark runs, Manim
+    # compilation is 79% of total wall clock (251 of 316 minutes) and is pure
+    # CPU work that is independent per scene — each scene already renders into
+    # its own media_dir precisely so concurrent runs cannot collide (see
+    # media_paths.scene_media_dir, verified at 4 concurrent renders).
+    #
+    # Defaults to 1 (the historical sequential path, bit-for-bit) because the
+    # concurrent path had not been exercised end-to-end when it was added. Set
+    # RENDER_WORKERS=4 to enable, and watch peak RAM: each worker is a separate
+    # Manim process.
+    render_workers: int = 1
 
 
 def get_visual_config() -> VisualConfig:
@@ -427,12 +456,14 @@ def get_visual_config() -> VisualConfig:
         visual_qa_enabled=_env_bool("VISUAL_QA_ENABLED", True),
         global_style=_env("GLOBAL_VISUAL_STYLE", DEFAULT_GLOBAL_VISUAL_STYLE),
         manim_quality=_env("MANIM_QUALITY", "low").lower(),
-        frames_per_scene=max(1, _env_int("QA_FRAMES_PER_SCENE", 3)),
+        frames_per_scene=max(1, _env_int("QA_FRAMES_PER_SCENE", 12)),
+        render_workers=max(1, min(8, _env_int("RENDER_WORKERS", 1))),
         blank_content_ratio=_env_float("QA_BLANK_CONTENT_RATIO", 0.0025),
         white_min_brightness=_env_float("QA_WHITE_MIN_BRIGHTNESS", 247.0),
         min_stddev=_env_float("QA_MIN_STDDEV", 1.5),
         edge_content_ratio=_env_float("QA_EDGE_CONTENT_RATIO", 0.020),
         near_identical_mae=_env_float("QA_NEAR_IDENTICAL_MAE", 4.0),
+        min_scene_motion=_env_float("QA_MIN_SCENE_MOTION", 0.05),
         min_scene_change_mae=_env_float("QA_MIN_SCENE_CHANGE_MAE", 2.0),
         max_tail_pad_seconds=_env_float("QA_MAX_TAIL_PAD_SECONDS", 0.75),
         max_static_run_seconds=_env_float("QA_MAX_STATIC_RUN_SECONDS", 3.0),

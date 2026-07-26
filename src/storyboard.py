@@ -41,10 +41,10 @@ def required_distinct_approaches(target_duration: int, scene_count: int) -> int:
     target = int(target_duration or 60)
     if target <= 60:
         base = 5
-    elif target >= 120:
-        base = 8
-    else:
+    elif target <= 120:
         base = 5 + round((target - 60) / 20.0)  # 60->5 ... 120->8
+    else:
+        base = 8 + round((target - 120) / 20.0)  # 120->8 ... 180->11
     return max(1, min(base, max(1, scene_count)))
 
 
@@ -357,8 +357,8 @@ Worked examples:
 - "Introducing the lesson and its central question" -> primary general, secondary []
 
 DIMENSIONALITY (choose what TEACHES best — depth is a tool, not a reward):
-- 2d suits most explanatory work: graphs, equations, 2D vectors, force diagrams,
-  circuits, processes, comparisons, probability and most abstract ideas.
+- 2d is the right default for a scene built around ONE object: a single graph, a
+  single triangle, one circuit, one number line, one force diagram.
 - 2.5d (layered 2D) is UNDER-USED and is often the strongest upgrade available.
   It is a normal flat scene that uses depth ORDERING — z-index, foreground vs
   background, scale and opacity hierarchy, deliberate occlusion. Choose it when
@@ -366,13 +366,29 @@ DIMENSIONALITY (choose what TEACHES best — depth is a tool, not a reward):
   what" genuinely clarifies the relationship. A flat scene that LIFTS into
   layered depth at the moment depth starts to explain something is both clearer
   and more engaging than staying flat throughout.
+  DEFAULT TO 2.5d for these, which are the cases it measurably improves:
+    * a COMPARISON of two cases, or a before/after — the active side comes
+      forward, the other dims back;
+    * an OVERLAY landing on existing content (a triangle drawn over a real
+      situation, a curve over its axes, an annotation over a diagram);
+    * a FORMULA BREAKDOWN — the term under discussion lifts to the front while
+      the rest of the expression dims into the background stack;
+    * any scene holding SEVERAL elements at once, where the viewer needs to know
+      which one to look at right now.
+  Measured across 237 rendered scenes, 2.5d scenes carried ~43% more content on
+  screen, were far less likely to be flagged as "nothing meaningfully changed"
+  (43% vs 60%) or as near-identical to their neighbour (25% vs 35%), and cost NO
+  extra render time — z-index and opacity are free, they add no geometry.
 - 3d is for when spatial structure IS the concept and 2d would misrepresent it:
   3D geometry/volume, rotation about a spatial axis, vectors/planes in 3-space,
   orbital motion, a genuinely spatial field. Not for looks.
 - ACROSS THE WHOLE VIDEO, aim for dimensional variety rather than a uniformly
-  flat set of scenes: where the topic supports it, 1-2 scenes should use 2.5d.
+  flat set of scenes: on a typical topic ABOUT A THIRD of scenes earn 2.5d, and
+  a topic dense with comparisons, overlays or formula work can justify more.
   This is a guideline, not a quota — never push a scene into layered depth that
-  does not benefit from it, and never choose 3d merely to add variety.
+  does not benefit from it, and never choose 3d merely to add variety. A scene
+  with one object in it should stay 2d; forced layering on a single object is
+  decoration, and decoration is what the hard rule below forbids.
 - The one hard rule: depth must EXPLAIN something. Depth added because it looks
   impressive is wrong in every dimension.
 

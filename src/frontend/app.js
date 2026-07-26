@@ -74,6 +74,10 @@ const steps = {
 let currentJobId = null;
 let progressInterval = null;
 let lastLoggedMessage = null;
+// Highest activity-feed seq already rendered. Sent back as ?since= so each poll
+// returns only new entries — the feed is append-only, so nothing is missed even
+// when a scene emits a dozen messages inside one 2s polling interval.
+let lastLoggedSeq = 0;
 let jobStartTime = null;
 let elapsedInterval = null;
 
@@ -200,7 +204,8 @@ videoForm.addEventListener('submit', async (e) => {
 function startProgressPolling() {
     progressInterval = setInterval(async () => {
         try {
-            const response = await fetch(`${API_BASE_URL}/api/progress/${currentJobId}`);
+            const response = await fetch(
+                `${API_BASE_URL}/api/progress/${currentJobId}?since=${lastLoggedSeq}`);
 
             if (!response.ok) {
                 throw new Error('Failed to fetch progress');
@@ -242,7 +247,7 @@ function stopProgressPolling() {
 
 // Update progress UI
 function updateProgress(data) {
-    const { progress, current_step, message } = data;
+    const { progress, current_step, message, messages } = data;
 
     // Update progress bar
     updateProgressBar(progress);
@@ -250,8 +255,19 @@ function updateProgress(data) {
     // Update steps
     updateSteps(current_step);
 
-    // Add log message
-    if (message && message !== lastLoggedMessage) {
+    // Render every entry emitted since the last poll, in order. Falls back to
+    // the single latest message for a server that predates the feed.
+    if (Array.isArray(messages) && messages.length) {
+        messages
+            .slice()
+            .sort((a, b) => (a.seq || 0) - (b.seq || 0))
+            .forEach((entry) => {
+                if (!entry || !entry.text || (entry.seq || 0) <= lastLoggedSeq) return;
+                lastLoggedSeq = entry.seq || lastLoggedSeq;
+                lastLoggedMessage = entry.text;
+                addLog(entry.text);
+            });
+    } else if (message && message !== lastLoggedMessage) {
         lastLoggedMessage = message;
         addLog(message);
     }
@@ -367,6 +383,7 @@ function resetProgress() {
     });
     progressLog.innerHTML = '<div class="log-placeholder">Waiting for updates…</div>';
     lastLoggedMessage = null;
+    lastLoggedSeq = 0;
     if (progressElapsed) progressElapsed.textContent = '00:00';
     if (reviewSection) {
         reviewSection.classList.add('hidden');

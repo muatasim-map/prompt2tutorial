@@ -341,9 +341,9 @@ EXPRESSIVE ADDITIONS — all verified to work here; use where they carry meaning
     rush_into (building toward a result), rush_from (a result unfolding fast).
 
 GRAPHING (Axes/plots — for math, physics, statistics; no reactive tracking needed).
-THESE ARE THE ONLY Axes METHODS THAT EXIST. Do not invent others — a guessed
-method name is the #1 cause of a failed render:
-  - axes = Axes(x_range=[a,b], y_range=[c,d], x_length=.., y_length=..)
+THESE ARE THE ONLY Axes METHODS THAT EXIST. Do not invent others — a guessed method name or keyword argument is a top cause of failed renders:
+  - axes = Axes(x_range=[a,b], y_range=[c,d], x_length=.., y_length=.., axis_config={"color": GREY})
+  - PROHIBITED KWARGS (DO NOT USE): `axis_color` (use `axis_config={"color": ...}`), `include_axes`, or undefined color `TRANSPARENT` (use `fill_opacity=0`).
   - axes.plot(lambda x: ..., x_range=[a,b], color=..)      -> a curve
   - axes.plot_parametric_curve(lambda t: [x(t), y(t), 0], t_range=[a,b])
   - axes.c2p(x, y)    coords -> screen point   (use this to PLACE objects)
@@ -479,17 +479,13 @@ LIFT INTO DEPTH (2.5D is available here and is encouraged where it earns its pla
 
 # Sent when the storyboard selected 2.5d — layering IS the point of this scene.
 _TWOFIVED_NOTE = """DIMENSION FOR THIS SCENE: 2.5D (layered 2D — still a normal `class X(Scene)`).
-Layering is the POINT of this scene, not a garnish.
-- Imply depth with obj.set_z_index(n) (higher draws in front), plus scale
-  (nearer = larger) and opacity (farther = dimmer), and deliberate occlusion.
-- Prefer to EARN the depth on screen: start the elements flat, then animate them
-  into their layered arrangement so the viewer sees the stack form, rather than
-  opening on a pre-stacked frame.
-- Animate one layer sliding over/under another to reveal ordering; bring the
-  layer under discussion forward and push the rest back.
-- This is still a flat Scene: no three-dimensional scene type, spatial axes,
-  solid bodies or camera-orientation calls. Fake depth as decoration is
-  forbidden."""
+Layering is the POINT of this scene, not a garnish. Apply 2.5D depth across all overlay, comparison, formula breakdown, and multi-element scenes:
+- Imply depth with obj.set_z_index(n) (higher n draws in front; foreground=20+, midground=10, background=0), plus scale (nearer = larger, scale(1.1-1.2)) and opacity (farther = dimmer, opacity=0.35-0.5), and deliberate occlusion.
+- For FORMULA BREAKDOWNS: lift active variables/terms to the front layer (`set_z_index(20)`, `scale(1.15)`), while dimming secondary variables into the background stack (`set_z_index(1)`, `opacity=0.35`).
+- For COMPARISONS & OVERLAYS: slide the active comparison side or overlay diagram onto the top layer (`set_z_index(20)`), leaving background grids and reference axes underneath (`set_z_index(0)`).
+- Prefer to EARN the depth on screen: start elements flat, then animate them into their layered arrangement so the viewer sees the stack form.
+- Animate one layer sliding over/under another to reveal ordering; bring the layer under discussion forward and push the rest back.
+- This is still a flat Scene: no three-dimensional scene type, spatial axes, solid bodies or camera-orientation calls."""
 
 
 # 3D constructs below were render-verified in this environment (cairo renderer,
@@ -575,7 +571,30 @@ _COLOR_DIRECTION = """COLOR DIRECTION (disciplined, not decorative):
 _VISUAL_QUALITY_RULES = """VISUAL QUALITY REQUIREMENTS (for crisp 1080p output):
 1. Clear visual hierarchy: one focal element; supporting elements smaller/dimmer.
 2. Keep ALL content inside safe margins (roughly x in [-6.5, 6.5], y in [-3.5, 3.5]);
-   never let objects run off-screen. Use fit_to_frame() or scale down large groups.
+   never let objects run off-screen. To shrink something oversized use
+   fit_to_frame(obj) from the optional toolkit, or
+   obj.scale_to_fit_width(w) / obj.scale_to_fit_height(h) / obj.scale(f).
+   NOTE fit_to_frame only ever scales DOWN — it will not enlarge a small figure,
+   so it satisfies this rule but never rule 2b.
+2b. FILL THE FRAME — but stay INSIDE the margins in rule 2, never touching them.
+   The full frame is 14.2 x 8 units; the safe area in rule 2 is smaller
+   (~13 x 7) precisely so a figure sized to it never needs to graze the edge.
+   The single most common defect in this system is a tiny diagram marooned in
+   black — measured across rendered output, the typical scene lights up only
+   2-5% of the frame — but the fix is a sized target, not "as big as possible":
+     * width: 8-9 units (leaves >=2 units of clear margin inside the 13-wide
+       safe area)
+     * height: 4-4.5 units when a title/label sits at the top via to_edge(UP)
+       (which itself occupies ~1-1.5 units), or up to 5 units with no title
+   These are CEILINGS, not targets to approach from above — if a diagram would
+   need more than this to read clearly, it is showing too much at once; split
+   it into a sequence of beats instead of one crowded frame.
+   Size it deliberately, e.g. `axes = Axes(..., x_length=8.5, y_length=4.5)` or
+   `diagram.scale_to_fit_height(4.5)`, THEN position it — scaling after
+   positioning can push a centred object past these numbers.
+   A figure at these sizes is still far bigger than the 2-5% baseline this rule
+   exists to fix; do not scale further to chase "bigger," that is what causes
+   clipping.
 3. NO overlapping objects or overlapping text. Separate elements spatially or in time.
 4. Font sizes: titles 44-54, labels 28-36, captions 22-26. Avoid walls of text.
 5. The visual demonstrates the concept; text is only a short label, not the explanation."""
@@ -888,6 +907,25 @@ IMPORTANT TECHNICAL RESTRICTIONS:
 7. NEVER use positioning methods on empty Text/Paragraph objects
 8. If you need placeholder text, use actual text like Text("Placeholder")
 9. NEVER use MathTex, Tex, or any LaTeX-based rendering (LaTeX is not installed). Use standard Text or Paragraph objects for math (e.g. Text('C = 2 * pi * r') or Text('pi')).
+9b. LaTeX SYNTAX is banned too, not just the LaTeX classes. A Text object renders
+    its string literally, so \\frac, \\lim, \\sqrt, ^{{}}, _{{}} and $...$ appear
+    on screen as raw backslashes and braces. Write maths the way a person would
+    type it: Text('f(x) = (f(x+h) - f(x)) / h'), Text('x^2') or Text('x²'),
+    Text('sqrt(2)'). Never put a backslash in a Text string.
+10. CONSTANTS: pi is PI (from manim), never np.PI — numpy spells it np.pi and has
+    NO attribute named PI, so np.PI raises AttributeError every time. Also
+    available from manim: TAU, DEGREES, E. If you use numpy at all, `import numpy
+    as np` explicitly; math.* requires `import math`.
+11. DO NOT INVENT CONSTRUCTOR KWARGS. These do not exist and each one kills the
+    render: axis_color, include_axes, include_numbers, n_points, num_tips,
+    derivative_line_color, and stroke_width / x_range passed to something that
+    does not take them. Axes takes x_range, y_range, x_length, y_length and
+    axis_config={{...}} — colour and stroke go INSIDE axis_config, or are set
+    afterwards with .set_color(...) / .set_stroke(...). If you are not certain a
+    kwarg exists, construct the object plain and set the property on the next
+    line. There is no TRANSPARENT colour constant; use opacity=0 instead.
+12. Methods that DO NOT exist in Manim CE (they are ManimGL): add_coordinate_labels
+    (use add_coordinates), scale_in_place (use .scale), get_graph (use .plot).
 
 {_COLOR_DIRECTION}
 
@@ -1093,6 +1131,35 @@ TECHNICAL RULES:
     get_riemann_rectangles, get_graph_label, get_axis_labels, get_vertical_line,
     get_secant_slope_group. For an unknown kwarg, drop it and set the property
     after construction instead.
+12a. KNOWN FIXES — apply these EXACTLY; do not re-emit the failing token. Repeating
+    the same identifier the error just named wastes the attempt:
+      "module 'numpy' has no attribute 'PI'"   -> replace np.PI with PI (numpy
+          spells it np.pi; manim exports PI, TAU, DEGREES, E).
+      unexpected keyword 'axis_color'          -> delete it; put color inside
+          axis_config={{"color": ...}} or call .set_color(...) after construction.
+      unexpected keyword 'include_axes' / 'include_numbers' / 'n_points' /
+      'num_tips' / 'derivative_line_color'     -> delete the kwarg entirely.
+      'stroke_width' / 'x_range' rejected      -> that object does not take it;
+          drop it and set the property on the following line.
+      "name 'TRANSPARENT' is not defined"      -> there is no such constant; use
+          fill_opacity=0 / stroke_opacity=0.
+      'add_coordinate_labels'                  -> add_coordinates
+      'scale_in_place'                         -> .scale
+      "index 0 is out of bounds for axis 0 with size 0" from get_vertices() /
+      get_start() / get_end() / get_center() AFTER a Transform or
+      ReplacementTransform -> the source mobject's points were emptied by that
+      Transform. This happens when the Transform's TARGET group nests the
+      SOURCE group inside itself, e.g. Transform(a, VGroup(a, b)) — do not
+      build a target that contains its own source. Fix by calling
+      get_vertices()/get_start()/get_end() BEFORE the Transform and storing the
+      result in a variable, or by restructuring the target as an independent
+      copy (VGroup(a.copy(), b)) rather than including ``a`` itself.
+      "invalid syntax" near a backslash or '%' -> a LaTeX fragment or a stray
+          format specifier leaked into a Text string; rewrite it as plain typed
+          maths, e.g. Text('(f(x+h) - f(x)) / h'). Never a backslash in Text.
+      Timeout                                  -> the scene is too expensive:
+          cut always_redraw count to one, shorten sweeps to ~3s, drop Surface
+          resolution to (12, 12), and never rebuild a Text every frame.
 13. Verified 3D API (if this is a ThreeDScene): set_camera_orientation(phi=,theta=),
     ThreeDAxes, axes.c2p(x,y,z), Line3D (prefer over the slow Arrow3D), Cube,
     Sphere, Surface, Rotate(obj, angle=, axis=). No ambient rotation, no updaters.

@@ -52,9 +52,9 @@ def _duration_profile(target_duration: int) -> dict:
     target = max(10, int(target_duration or 60))
     wps = TTS_WORDS_PER_SECOND  # ~2.6 words/second of speech
 
-    scenes = max(3, min(14, round(target / _SECONDS_PER_SCENE)))
+    scenes = max(3, min(22, round(target / _SECONDS_PER_SCENE)))
     lo_scenes = max(3, scenes - 1)
-    hi_scenes = min(16, scenes + 1)
+    hi_scenes = min(25, scenes + 2)
 
     per_scene_seconds = target / scenes
     words = round(per_scene_seconds * wps)

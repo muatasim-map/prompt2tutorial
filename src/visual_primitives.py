@@ -30,6 +30,7 @@ from manim import (
     Arrow,
     Circle,
     Create,
+    Dot,
     FadeIn,
     FadeOut,
     Line,
@@ -223,9 +224,103 @@ def clear_scene(scene, run_time: float = 0.6):
         scene.play(*[FadeOut(m) for m in scene.mobjects], run_time=run_time)
 
 
+# --------------------------------------------------------------------------- #
+# DSA & Code Primitives (IDE Terminal & Data Structure Grid)
+# --------------------------------------------------------------------------- #
+
+
+def make_code_terminal(
+    code_lines: list[str],
+    title: str = "solution.py",
+    width: float = 6.2,
+    height: float = 4.6,
+    font_size: int = 18,
+    bg_color="#0b0f19",
+    border_color="#1e293b",
+) -> VGroup:
+    """Build a Glassmorphic IDE Code Terminal window as a styled VGroup."""
+    container = RoundedRectangle(
+        corner_radius=0.25, width=width, height=height,
+        stroke_color=border_color, stroke_width=2.5,
+        fill_color=bg_color, fill_opacity=0.92,
+    )
+    
+    top_y = container.get_top()[1]
+    left_x = container.get_left()[0]
+    
+    dot_red = Dot(color=RED, radius=0.08).move_to([left_x + 0.35, top_y - 0.3, 0])
+    dot_yellow = Dot(color=YELLOW, radius=0.08).next_to(dot_red, RIGHT, buff=0.15)
+    dot_green = Dot(color=GREEN, radius=0.08).next_to(dot_yellow, RIGHT, buff=0.15)
+    
+    header_title = Text(str(title), font_size=14, color=GREY)
+    header_title.move_to([container.get_center()[0], top_y - 0.3, 0])
+    
+    header = VGroup(dot_red, dot_yellow, dot_green, header_title)
+    
+    line_mobjects = []
+    start_y = top_y - 0.8
+    for i, line_str in enumerate(code_lines):
+        txt = Text(str(line_str), font_size=font_size, color=WHITE)
+        txt.move_to([left_x + 0.4 + txt.width / 2.0, start_y - (i * 0.45), 0])
+        line_mobjects.append(txt)
+    
+    lines_group = VGroup(*line_mobjects)
+    
+    term = VGroup(container, header, lines_group)
+    term.line_objects = line_mobjects
+    term.container = container
+    return term
+
+
+def make_array_grid(
+    values: list,
+    indices: bool = True,
+    width: float = 1.1,
+    height: float = 1.1,
+    gap: float = 0.15,
+    cell_color="#38bdf8",
+    bg_color="#0f172a",
+) -> VGroup:
+    """Build a horizontal 2.5D memory cell grid with index labels."""
+    cells = []
+    val_texts = []
+    idx_labels = []
+    
+    for i, val in enumerate(values):
+        box = RoundedRectangle(
+            corner_radius=0.12, width=width, height=height,
+            stroke_color=cell_color, stroke_width=2.0,
+            fill_color=bg_color, fill_opacity=0.85,
+        )
+        val_txt = Text(str(val), font_size=24, color=WHITE)
+        val_txt.move_to(box.get_center())
+        
+        cells.append(box)
+        val_texts.append(val_txt)
+        
+        if indices:
+            idx_txt = Text(str(i), font_size=16, color=GREY)
+            idx_txt.next_to(box, DOWN, buff=0.2)
+            idx_labels.append(idx_txt)
+            
+    grid_group = VGroup()
+    for i in range(len(values)):
+        if indices:
+            unit = VGroup(cells[i], val_texts[i], idx_labels[i])
+        else:
+            unit = VGroup(cells[i], val_texts[i])
+        grid_group.add(unit)
+        
+    grid_group.arrange(RIGHT, buff=gap)
+    grid_group.cells = cells
+    grid_group.val_texts = val_texts
+    grid_group.idx_labels = idx_labels
+    return grid_group
+
+
 __all__ = [
     "PALETTE", "SAFE_MARGIN", "safe_width", "safe_height", "fit_to_frame",
     "styled_title", "body_text", "caption", "make_node", "make_box", "connect",
     "token_chip", "prob_bar", "highlight", "row", "column", "grid",
-    "morph", "reveal", "clear_scene",
+    "morph", "reveal", "clear_scene", "make_code_terminal", "make_array_grid",
 ]

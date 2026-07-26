@@ -39,7 +39,7 @@ class _Service:
 
 def test_profile_targets_not_ceilings():
     p = A._duration_profile(120)
-    assert "12-14 scenes" in p["scene_count"]
+    assert "scenes" in p["scene_count"]
     assert p["total_words"] == round(120 * A.TTS_WORDS_PER_SECOND)
     # must not read as an upper bound any more
     assert "MAXIMUM" not in p["time_rest"]

@@ -84,6 +84,16 @@ _GEOMETRY = """GEOMETRY, COORDINATE GEOMETRY & TRIGONOMETRY
   Say what the projection MEANS, because students are rarely shown it: the
   vertical drop from the circle point to the axis IS sin θ, and the horizontal
   offset IS cos θ. The sine is a projection, not a number from a table.
+- Tangent Function (tan θ) Visual:
+  Draw a vertical DashedLine at x = 1 (tangent to the unit circle). Extend the
+  rotating radius line outward until it intersects x = 1. The vertical height
+  of this intersection point above the x-axis IS tan θ = sin θ / cos θ. As θ
+  approaches 90° (PI/2), the intersection moves toward infinity, showing WHY
+  tan θ has a vertical asymptote!
+- Small Angle Approximations (sin θ ≈ θ, tan θ ≈ θ, cos θ ≈ 1 - θ²/2 for small θ):
+  Zoom in near the origin on Axes. Plot y = sin(x) in cyan and the line y = x
+  in bright yellow. For small angles (θ < 0.2 rad ≈ 11°), show the curve and
+  the straight line overlapping almost identically.
 - Why trig works at all — SCALE INVARIANCE: one tracker on a scale factor grows
   and shrinks a right triangle while the ratio opp/hyp stays FIXED. The triangle
   visibly changes size; the ratio does not. This answers "why does a ratio
@@ -125,10 +135,10 @@ _GEOMETRY = """GEOMETRY, COORDINATE GEOMETRY & TRIGONOMETRY
   behind the triangle is what stops it becoming "just a maths diagram".
 - CAST / quadrant sign work: shade the relevant unit-circle quadrant (Sector)
   and show the sign of each ratio there.
-- RENDER COST (measured here, 480p15 — a sweep scene is easy to make 10x slower
-  than it needs to be): reactive GEOMETRY is cheap (~5s for several
-  always_redraw shapes over a 3s sweep), but a Text rebuilt every frame via
-  always_redraw costs ~3x MORE THAN THE ENTIRE REST OF THE SCENE. Prefer to let
+- RENDER COST & ZERO-REGRESSION RULE (measured here, 480p15 — a sweep scene is easy
+  to make 10x slower than it needs to be): reactive GEOMETRY is cheap (~5s for
+  several always_redraw shapes over a 3s sweep), but a Text rebuilt every frame
+  via always_redraw costs ~3x MORE THAN THE ENTIRE REST OF THE SCENE. Prefer to let
   the geometry carry the value — the projection line's length IS sin θ — with a
   couple of STATIC labels. If a changing number is genuinely the point, update it
   a few times rather than every frame. Build all of one figure's parts inside ONE
@@ -141,18 +151,31 @@ _LINEAR_ALGEBRA = """VECTORS & LINEAR ALGEBRA
 - Position vectors as arrows FROM the origin TO a point; addition as tip-to-tail
   placement (GrowArrow the second arrow starting where the first ends); scalar
   multiplication as stretching along the same line.
-- A vector equation of a line as a fixed point plus a direction arrow, with a
-  second point built by adding a scaled copy of that direction
-  (TransformFromCopy + shift).
-- The scalar product as one vector projected onto another (a short perpendicular
-  Line dropped onto the second vector's direction).
-- A matrix as a TRANSFORMATION acting visibly on something: Transform a grid,
-  the unit square, or a set of arrows, so input-to-output correspondence is
-  watchable. A determinant as the signed area of the transformed unit square.
-  An eigenvector as a direction that only scales — its arrow stays on its own
-  line while other arrows swing off theirs.
-- Use 2D for 2x2 work. True 3D only for genuinely spatial vectors, planes or
-  volumes."""
+- Matrix Transformations — THE COLUMN BASIS RULE (3Blue1Brown signature visual):
+  A matrix [[a, b], [c, d]] is NOT a box of 4 numbers — it is a instruction for
+  where space goes:
+  - Column 1 [a, c]^T is WHERE i_hat (1,0) LANDS. Draw i_hat as a thick GREEN arrow.
+  - Column 2 [b, d]^T is WHERE j_hat (0,1) LANDS. Draw j_hat as a thick RED arrow.
+  - Use NumberPlane for the background grid. Transform i_hat -> [a,c], j_hat -> [b,d],
+    and the NumberPlane simultaneously using play(i_hat.animate.move_to(...),
+    j_hat.animate.move_to(...), plane.animate.apply_matrix([[a,b],[c,d]])).
+- Clean Matrix Notation (No-LaTeX Bracket Pattern):
+  Never write messy text strings like "[[2,1],[1,3]]". Render matrices by placing
+  4 distinct Text/MathTex entries inside a 2x2 grid, flanked by left and right
+  bracket lines (or bracket Arc/Line pairs forming [ ]). Ensure generous spacing
+  (buff=0.35) so numbers never touch or overlap bracket borders.
+- Determinant as Area & Orientation:
+  - The determinant det(A) = ad - bc is the SIGNED AREA of the unit square after transformation.
+  - Draw the unit square (Polygon between (0,0), i_hat, i_hat+j_hat, j_hat) before
+    transformation, then Transform it into the transformed parallelogram.
+  - Shade the transformed parallelogram with get_area or a semi-transparent Polygon.
+  - If det(A) < 0, highlight that space was FLIPPED (orientation inversion / chirality change).
+  - If det(A) = 0, show the 2D plane collapsing into a 1D line (rank 1) or 0D point (rank 0).
+- Eigenvectors & Eigenvalues:
+  - An eigenvector is a line where vectors DO NOT ROTATE during transformation — they only stretch by factor lambda.
+  - Draw the eigenvector as a long dashed line. Place a vector arrow on it and show it stretching by lambda while off-axis vectors rotate off their lines.
+- Matrix Multiplication (Composition):
+  - AB means apply A FIRST, then apply B to the result. Show two sequential grid warps."""
 
 _CALCULUS = """CALCULUS
 - Plot on Axes; roots as x-intercept Dots, intersections where two plots meet.
@@ -164,9 +187,25 @@ _CALCULUS = """CALCULUS
   the curve so the slope visibly changes at every point, best when "how the
   gradient varies along the curve" is the point (this is the verified
   CONTROLLED CONTINUOUS MOTION tangent pattern — obey its render-cost limits).
-- A limit as a Dot approaching along the curve (MoveAlongPath), OR a single
-  ValueTracker driving the point continuously toward the limiting value with a
-  coupled readout — whichever makes the approach clearer.
+- Product Rule (uv)' = u'v + uv' (Visual Area Expansion):
+  Visualize u * v as a Rectangle of width u and height v. As u and v change,
+  show the area expanding by adding a vertical strip (u * dv) and a horizontal
+  strip (v * du), with the tiny corner (du * dv) shrinking to 0 as dx -> 0.
+- Chain Rule dy/dx = (dy/du) * (du/dx):
+  Visualize as two linked rate sliders or gear wheels: input x drives intermediate u
+  at rate du/dx, which drives output y at rate dy/du. The overall rate is the product.
+- Fundamental Theorem of Calculus (Area Accumulator):
+  - Let A(x) = integral from a to x of f(t) dt (shaded get_area from a to x).
+  - Move x right by a small step dx using ValueTracker. Show a thin vertical strip of
+    width dx and height f(x) being added to the area: dA = f(x) * dx.
+  - Therefore dA/dx = f(x) — the rate of area accumulation IS the height of the curve!
+- Second Derivative f''(x), Concavity & Inflection Points:
+  - Concave Up (f'' > 0): Tangent line sits BELOW the curve; gradient f' is INCREASING.
+  - Concave Down (f'' < 0): Tangent line sits ABOVE the curve; gradient f' is DECREASING.
+  - Point of Inflection: The point where f''(x) = 0 and concavity reverses (tangent crosses through the curve).
+- Differential Equations & Slope Fields:
+  - Draw a Slope Field (a grid of short Line segments whose slopes match dy/dx = f(x,y)).
+  - Animate a Dot tracing a solution curve through the slope field, aligning with the tangent lines at every point.
 - Stationary points: a SHORT HORIZONTAL tangent Line at each one — horizontality
   is the visual definition of gradient zero. Distinguish a maximum from a
   minimum by sliding a tangent through the point so its slope visibly changes
@@ -208,15 +247,95 @@ _PROBABILITY_STATISTICS = """PROBABILITY & STATISTICS
 - A box plot as a Line (whiskers) with a Rectangle (the box) in correct
   proportion; correlation as a scatter of Dots with a Line fitted through."""
 
-_DISCRETE_ALGORITHMS = """DISCRETE STRUCTURES & ALGORITHMS
-- Sets, logic and graphs as nodes + edges; membership and relations as
-  containment or connection, not as prose.
-- An algorithm as state changing on ONE small concrete example — highlight the
-  element under consideration at each step (a colour change or Indicate) and
-  let the structure visibly update. A viewer should be able to follow the run,
-  not read pseudocode.
-- Recursion/divide-and-conquer as a structure splitting into parts and results
-  recombining; a counter or accumulator as a quantity that grows."""
+_DISCRETE_ALGORITHMS = """DISCRETE STRUCTURES & ALGORITHMS (DSA, ARRAYS & TERMINAL VISUALS)
+- STRICT DOMAIN SCOPING RULE (CRITICAL):
+  - The Split-Screen Code Terminal & Data Structure Arena layout is ONLY to be used
+    for DSA / LeetCode / Coding Algorithm topics (e.g. `dsa`, `arrays`, `two_pointers`,
+    `binary_search`, `hashing`, `sliding_window`, `kadane`, `intervals`, `greedy`).
+  - DO NOT render a Code Terminal in Geometry, Trigonometry, Calculus, Physics, or
+    General concept scenes (e.g. "Why honeycombs are hexagonal"). General/physics
+    scenes must use standard mathematical diagrams, geometry, or graphs instead!
+
+- Glassmorphic IDE & Code Terminal Styling (Premium LeetCode Aesthetic):
+  - Left Panel (x = -3.5): Data Structure Memory Arena.
+    - Array Memory Cells: RoundedRectangle(corner_radius=0.12, width=1.1, height=1.1,
+      stroke_color="#38bdf8", stroke_width=2.0, fill_color="#0f172a", fill_opacity=0.85).
+    - Sub-Index Pills: Crisp index numbers (0, 1, 2...) below each cell in muted gray (#64748b).
+    - Pointer Badges: Colored pointer arrows (Text "L", color="#22c55e" Green; Text "R",
+      color="#ef4444" Red; Text "i", color="#38bdf8" Cyan; Text "mid", color="#eab308" Yellow).
+  - Right Panel (x = +3.5): Syntax-Highlighted Glassmorphic Code Terminal.
+    - Outer IDE Container: RoundedRectangle(corner_radius=0.25, width=6.2, height=4.6,
+      stroke_color="#1e293b", stroke_width=2.5, fill_color="#0b0f19", fill_opacity=0.92).
+    - Window Control Dots: 3 top-left dots (Red "#ef4444", Yellow "#eab308", Green "#22c55e").
+    - Header Bar Title: Text("two_sum.py", font_size=14, color="#94a3b8") centered in window bar.
+    - Syntax Color Palette: Monospaced Python/Pseudocode with purple keywords (#c084fc for def, for, in, if, return),
+      cyan variables (#38bdf8), and orange values (#fb923c).
+  - Active Line Tracker: Move a glowing line highlighter (SurroundingRectangle(line_text,
+    color="#f59e0b", fill_color="#f59e0b", fill_opacity=0.15, stroke_width=2.0)) down line-by-line
+    with a small leading arrow Text("▶", color="#f59e0b", font_size=12).
+- Pattern 1: Linear Traversal & Accumulation (Sum/Product, Min/Max, Count, Streaks):
+  - Animate scanning: pointer i steps right across cells (LaggedStart or ValueTracker).
+  - Highlight current element (cell[i].set_fill(CYAN, opacity=0.4)).
+  - Accumulator readout on left (e.g. "Sum: 14", "Max: 9") updates in step with i.
+- Pattern 2: Linear Search & Occurrence Tracking (Target, First/Last/All, Existence):
+  - Display Target callout card (e.g. "Target = 7").
+  - Pointer i scans left to right: non-matching cells flash subtle red/grey; matching
+    cell flashes bright GREEN (cell[i].set_fill(GREEN, opacity=0.6)) and locks.
+- Pattern 3: Basic Array Manipulation (Swap, Reverse, Copy, Merge, Rotate, Compact):
+  - Swapping: Draw two curved arcs (CurvedArrow or Arc) above the two swapping cells,
+    then execute ReplacementTransform to cross their positions in 2.5D space.
+  - Read/Write Pointers: Advance read_ptr and write_ptr independently for in-place compaction.
+- Pattern 4: Basic Hashing & Frequency Mapping (Set Membership, Duplicates, Maps):
+  - Render an adjacent Hash Set / Map grid on the left (e.g. "seen = {}").
+  - When visiting arr[i], an Arrow or floating copy of the value flies into the Hash
+    Set grid. If already present, the set cell pulses Coral RED (duplicate detected!).
+- Pattern 5: Basic Two Pointers (Opposite Ends, Fast/Slow, Read/Write, Pair Search):
+  - Opposite-End: Left pointer L (Green arrow) at index 0, Right pointer R (Red arrow)
+    at N-1. Move L right (L += 1) or R left (R -= 1) based on comparison.
+  - Fast/Slow: Slow pointer (slow) advances only on valid condition; Fast pointer (fast)
+    scans every step.
+- Pattern 6: Basic Sorting Patterns (Sort & Scan, Adjacent Compare, Grouping):
+  - Unsorted array cells morph into sorted order via LaggedStart position shifts.
+  - Show adjacent comparison brackets (VGroup of 2 cell outlines) sliding across array.
+- Pattern 7: Basic Prefix & Suffix Patterns (Cumulative Sums, Ranges, Left-Right):
+  - Render a secondary Prefix Array beneath the main array.
+  - Show cumulative area/bar filling beneath each cell: prefix[i] = prefix[i-1] + arr[i].
+- Pattern 8: Basic Matrix Traversal (Row/Col Major, Diagonals, Boundary, Transpose):
+  - Render a 2D Grid of Squares (R x C).
+  - Active cell (row, col) scans sequentially across rows or columns with a glowing
+    cursor box. For matrix transpose, show symmetric cells swapping across the main diagonal.
+- Pattern 9: Sliding Window (Fixed/Variable Size, Expand R / Shrink L, Window Sum/Freq):
+  - Draw a glowing bounding box (RoundedRectangle, stroke_color=YELLOW) spanning arr[L:R+1].
+  - Expanding: R arrow moves right $\to$ window box stretches `window.animate.surround(arr[L:R+1])`.
+  - Shrinking: L arrow moves right when invalid $\to$ window box shrinks from left.
+- Pattern 10: Prefix Sum Range Queries (Range Sum, Min/Max, Subarray Sums):
+  - Display Prefix Array `P`. For range query `sum(L..R)`, highlight `P[R]` in Green
+    and `P[L-1]` in Orange, showing `Subarray Sum = P[R] - P[L-1]`.
+- Pattern 11: Binary Search & Range Bisection (Exact, Bounds, Insertion Point):
+  - Display L (Green arrow at left bound), R (Red arrow at right bound), and Mid
+    `mid = (L+R)//2` (Yellow arrow at midpoint).
+  - Compare `arr[mid]` to target: gray out eliminated half (fade opacity to 0.2) and
+    move L or R arrow to bisect the search space.
+- Pattern 12: Intermediate Two Pointers (3Sum Anchor, Container Most Water, Partitioning):
+  - 3Sum: Fix anchor pointer `i` (Cyan arrow), then run Two Pointers `L` and `R` on `arr[i+1:]`.
+  - Container Most Water: Vertical bar lines at `L` and `R` with shaded blue area `(R-L)*min(hL, hR)`
+    shrinking/growing as `L` or `R` moves inward.
+- Pattern 13: Kadane's Algorithm & Subarray DP (Max/Min Subarray, Best Stock Profit):
+  - Render dual meters on left: `Current Subarray Sum` and `Global Max Sum`.
+  - At cell `i`: show choice `max(arr[i], current_sum + arr[i])` — if `arr[i]` restarts
+    segment, current window flashes red and resets to start at `i`.
+- Pattern 14: Interval Basics (Merge Intervals, Insert, Overlap Detection):
+  - Render intervals as horizontal line segments `[start, end]` stacked vertically.
+  - Sort by start time. Show active pointer checking `end1 >= start2`: if overlapping,
+    the two segments morph (`Transform`) into one unified merged segment `[start1, max(end1, end2)]`.
+- Pattern 15: Advanced Matrix Operations (Spiral Traversal, 90° Rotation, Transpose):
+  - Spiral: 4 boundary arrows (`top`, `bottom`, `left`, `right`) shrinking inward after
+    each row/column traversal sweep.
+  - Rotation: Transpose cells across main diagonal, then reverse each row horizontally.
+- Pattern 16: Greedy Arrays (Jump Game Reachability, Jump Counting, Local Optimal Choice):
+  - Render `farthest_reach` indicator line above array (`max(farthest, i + nums[i])`).
+  - As pointer `i` steps forward, update `farthest_reach` boundary line. If `i > farthest`,
+    flash warning indicating unreachable destination."""
 
 _MECHANICS = """MECHANICS (kinematics, forces, energy, momentum, circular motion, SHM)
 - Kinematics: a Dot at successive positions with EVEN spacing for constant
@@ -442,18 +561,79 @@ def known_tags() -> Sequence[str]:
     return DOMAIN_TAGS
 
 
+_TAG_ALIASES = {
+    # Geometry & Trigonometry
+    "trigonometry": "geometry",
+    "trig": "geometry",
+    "triangles": "geometry",
+    "vector_geometry": "geometry",
+    # Probability & Statistics
+    "stats": "probability_statistics",
+    "probability": "probability_statistics",
+    "statistics": "probability_statistics",
+    # Calculus
+    "diff_eq": "calculus",
+    "differential_equations": "calculus",
+    "integration": "calculus",
+    "derivatives": "calculus",
+    "differentiation": "calculus",
+    # Discrete & Algorithms
+    "binary_search": "discrete_algorithms",
+    "algorithms": "discrete_algorithms",
+    "algorithm": "discrete_algorithms",
+    "sorting": "discrete_algorithms",
+    "dsa": "discrete_algorithms",
+    "array": "discrete_algorithms",
+    "arrays": "discrete_algorithms",
+    "two_pointers": "discrete_algorithms",
+    "two_pointer": "discrete_algorithms",
+    "hashing": "discrete_algorithms",
+    "hash_map": "discrete_algorithms",
+    "hash_set": "discrete_algorithms",
+    "prefix_sum": "discrete_algorithms",
+    "matrix_traversal": "discrete_algorithms",
+    "sliding_window": "discrete_algorithms",
+    "kadane": "discrete_algorithms",
+    "kadanes_algorithm": "discrete_algorithms",
+    "intervals": "discrete_algorithms",
+    "interval_merge": "discrete_algorithms",
+    "greedy": "discrete_algorithms",
+    "greedy_array": "discrete_algorithms",
+    # Mechanics
+    "shm": "mechanics",
+    "harmonic_motion": "mechanics",
+    # Waves
+    "standing_waves": "waves",
+    "superposition": "waves",
+    # Electricity
+    "circuits": "electricity",
+    "circuit": "electricity",
+    # Magnetism
+    "induction": "magnetism",
+    "electromagnetic_induction": "magnetism",
+    # Optics
+    "refraction": "optics",
+    "lenses": "optics",
+    # Quantum & Nuclear
+    "energy_levels": "quantum_nuclear",
+    "spectra": "quantum_nuclear",
+    "photons": "quantum_nuclear",
+}
+
+
 def normalize_tags(tags: Optional[Iterable[str]]) -> List[str]:
     """Filter to known tags, de-duplicate (first wins), and bound the count.
 
     Defensive: routing must never crash scene generation. Unknown tags are
-    rejected at the schema boundary; anything odd that reaches here is dropped
-    and the safe "general" default applies.
+    mapped via aliases or rejected at the schema boundary; anything odd that
+    reaches here is dropped and the safe "general" default applies.
     """
     out: List[str] = []
     for tag in tags or ():
         if not isinstance(tag, str):
             continue
         key = tag.strip().lower().replace("-", "_").replace(" ", "_")
+        key = _TAG_ALIASES.get(key, key)
         if key in _MODULES and key not in out:
             out.append(key)
     if not out:

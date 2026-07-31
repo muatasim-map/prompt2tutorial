@@ -1,0 +1,10 @@
+{
+  "name": "prompt2learn-ai",
+  "private": true,
+  "description": "Command shortcuts for the Python/Flask P2L.ai application",
+  "scripts": {
+    "dev": "python run.py",
+    "start": "python run.py",
+    "test": "python -m pytest"
+  }
+}

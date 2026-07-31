@@ -14,8 +14,10 @@ from __future__ import annotations
 from pathlib import Path
 
 # Bump when the cache key formula or stored artifact format changes.
-# v3: scene cache key now incorporates storyboard visual direction.
-CACHE_VERSION = "v3"
+# v3: scene cache key incorporates storyboard visual direction.
+# v4: rendered scenes are isolated by effective Manim quality preset.
+# v5: scripts must satisfy the stricter requested-duration contract.
+CACHE_VERSION = "v5"
 
 # Project root = parent of the ``src`` directory that holds this module.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import Iterable, List, Optional, Sequence
 
-from schemas import DOMAIN_TAGS, MAX_TOTAL_DOMAIN_TAGS
+from schemas import A_LEVEL_MATH_TOPICS, DOMAIN_TAGS, MAX_TOTAL_DOMAIN_TAGS
 
 # --------------------------------------------------------------------------- #
 # Correctness preamble — always sent with ANY specialist module (but not with a
@@ -275,7 +275,7 @@ _DISCRETE_ALGORITHMS = """DISCRETE STRUCTURES & ALGORITHMS (DSA, ARRAYS & TERMIN
     with a small leading arrow Text("▶", color="#f59e0b", font_size=12).
 - Pattern 1: Linear Traversal & Accumulation (Sum/Product, Min/Max, Count, Streaks):
   - Animate scanning: pointer i steps right across cells (LaggedStart or ValueTracker).
-  - Highlight current element (cell[i].set_fill(CYAN, opacity=0.4)).
+  - Highlight current element (cell[i].set_fill(TEAL_C, opacity=0.4)).
   - Accumulator readout on left (e.g. "Sum: 14", "Max: 9") updates in step with i.
 - Pattern 2: Linear Search & Occurrence Tracking (Target, First/Last/All, Existence):
   - Display Target callout card (e.g. "Target = 7").
@@ -530,6 +530,127 @@ borrow one, and it deserves the SAME visual effort as any domain scene):
   general scene is where inventing a fresh, concrete metaphor matters MOST —
   there is no formula to fall back on, so make the metaphor specific and
   visual rather than abstract and textual."""
+
+
+_A_LEVEL_MATH_MODULES = {
+    "algebra_functions": """ALGEBRA & FUNCTIONS
+- Keep each manipulation anchored to the expression it came from. Use
+  TransformFromCopy for substitution and rearrangement, with stable colors for
+  the same term across every line.
+- For composite and inverse functions, animate values through an input-machine-
+  output chain; reverse the arrows for the inverse and state domain restrictions.
+- For equations and inequalities, verify candidate roots and show excluded
+  values or sign intervals explicitly. Do not present algebra as unexplained
+  symbol replacement.""",
+    "graphs": """GRAPHS
+- Build axes first with meaningful ranges, then reveal intercepts, turning
+  points and asymptotes before interpreting the curve.
+- Show transformations by transforming the persistent curve while a parameter
+  changes; keep the parent graph dimly visible for comparison.
+- Use axes.c2p and axes.i2gp for every point. A graph must encode scale, domain,
+  range and discontinuities accurately, not merely look curve-like.""",
+    "coordinate_geometry": """COORDINATE GEOMETRY
+- Derive gradient from a visible rise/run triangle and connect it to the
+  coefficients in the line equation.
+- For circles, show center and radius geometrically before using the equation.
+  A tangent touches at one point and is perpendicular to the radius there.
+- For intersections, animate the same point satisfying both loci; distinguish
+  exact coordinates from visually estimated ones.""",
+    "sequences_series": """SEQUENCES & SERIES
+- Build recurrence terms from the preceding term and place nth-term values on a
+  number line or graph so convergence, oscillation or divergence is visible.
+- Show partial sums as an accumulator. For a geometric series, make the common
+  ratio visible and state that an infinite sum requires abs(r) < 1.
+- Preserve the distinction between a sequence of terms and its series of
+  accumulated sums.""",
+    "trigonometry": """TRIGONOMETRY
+- Use radians for calculus and graph motion. Link a unit-circle angle,
+  projection and graph point with one shared tracker.
+- When solving in an interval, mark every graph intersection and map solutions
+  to quadrants; never stop at the calculator's principal value.
+- For identities, transform matching terms while keeping both sides visible.
+  For sine/cosine rule problems, highlight the known side-angle structure that
+  justifies the selected rule before showing its name.""",
+    "exponentials_logarithms": """EXPONENTIALS & LOGARITHMS
+- Show constant multiplicative change over equal x-intervals. Distinguish
+  growth, decay, doubling time and half-life visually.
+- Present logarithms as inverse functions by reflecting the exponential in
+  y=x; show x > 0 as the logarithm's domain and the vertical asymptote.
+- When linearising data, transform the curved relationship into the correctly
+  relabelled straight-line graph and connect gradient/intercept to parameters.""",
+    "differentiation": """DIFFERENTIATION
+- Connect f, its moving tangent gradient and f' on aligned axes. Stationary
+  points of f must line up with roots of f'.
+- Make product, quotient and chain rules preserve the dependency structure;
+  do not show a memorised rule without identifying inner and outer functions.
+- For optimization, define the model and valid domain, solve for stationary
+  candidates, classify them, and interpret the answer in context.""",
+    "integration": """INTEGRATION
+- Treat definite integration as signed accumulation: areas below the axis are
+  negative. Show bounds moving on the same axes as the shaded region.
+- Show an indefinite integral with its constant of integration and explain it
+  as a family of vertical translations.
+- Refine Riemann rectangles or trapezia toward the area; for substitution,
+  transform the integrand, differential and limits together.""",
+    "numerical_methods": """NUMERICAL METHODS
+- For change-of-sign root location, mark the interval endpoints and show the
+  function values with opposite signs; do not claim this proves uniqueness.
+- For fixed-point iteration, use the cobweb between y=g(x) and y=x and show
+  convergence or divergence from the geometry.
+- For Newton-Raphson, draw each tangent and its next x-axis intercept. State the
+  starting value, stopping criterion and an appropriate error bound.""",
+    "vectors": """VECTORS
+- Draw vectors as directed arrows with components tied to the axes. Addition is
+  tip-to-tail; scalar multiplication changes magnitude and possibly direction.
+- For vector equations of lines, distinguish the position vector from the
+  direction vector and animate the parameter moving a point along the line.
+- At intersections, show the same point satisfying both parameterizations.
+  Do not imply skew 3D lines intersect merely because of a 2D projection.""",
+    "statistics": """STATISTICS
+- Keep sample, population, parameter and statistic visibly distinct. State the
+  sampling method and expose likely sources of bias.
+- Match the display to the variable: separated bars for discrete distributions,
+  a continuous density curve for normal models, and proportional histogram
+  area when class widths differ.
+- For hypothesis tests, show H0/H1, tail direction, significance level and the
+  test statistic against the critical region. Interpret in context and never
+  equate correlation with causation.""",
+}
+
+_missing_a_level = sorted(set(A_LEVEL_MATH_TOPICS) - set(_A_LEVEL_MATH_MODULES))
+if _missing_a_level:  # pragma: no cover
+    raise RuntimeError(
+        f"A-level mathematics topics without guidance: {_missing_a_level}"
+    )
+
+
+def build_a_level_math_section(topic: Optional[str]) -> str:
+    """Return exact syllabus guidance without adding unrelated maths modules."""
+    if not isinstance(topic, str):
+        return ""
+    key = topic.strip().lower().replace("-", "_").replace(" ", "_")
+    module = _A_LEVEL_MATH_MODULES.get(key)
+    if not module:
+        return ""
+    return f"A-LEVEL MATHEMATICS FOCUS (THIS scene only):\n{module}"
+
+
+def a_level_math_menu_for_prompt() -> str:
+    """Controlled syllabus-topic menu used by the storyboard director."""
+    labels = {
+        "algebra_functions": "Algebra & Functions",
+        "graphs": "Graphs",
+        "coordinate_geometry": "Coordinate Geometry",
+        "sequences_series": "Sequences & Series",
+        "trigonometry": "Trigonometry",
+        "exponentials_logarithms": "Exponentials & Logarithms",
+        "differentiation": "Differentiation",
+        "integration": "Integration",
+        "numerical_methods": "Numerical Methods",
+        "vectors": "Vectors",
+        "statistics": "Statistics",
+    }
+    return "\n".join(f"  - {key}: {labels[key]}" for key in A_LEVEL_MATH_TOPICS)
 
 
 _MODULES = {

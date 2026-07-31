@@ -397,6 +397,9 @@ class VisualConfig:
 
     storyboard_enabled: bool = True
     visual_repair_attempts: int = 1
+    # Advisory QA remains visible in reports but does not automatically spend
+    # another LLM call and full render unless explicitly opted in.
+    auto_repair_advisory_qa: bool = False
     contact_sheet_enabled: bool = True
     visual_qa_enabled: bool = True
     global_style: str = DEFAULT_GLOBAL_VISUAL_STYLE
@@ -440,11 +443,10 @@ class VisualConfig:
     # its own media_dir precisely so concurrent runs cannot collide (see
     # media_paths.scene_media_dir, verified at 4 concurrent renders).
     #
-    # Defaults to 1 (the historical sequential path, bit-for-bit) because the
-    # concurrent path had not been exercised end-to-end when it was added. Set
-    # RENDER_WORKERS=4 to enable, and watch peak RAM: each worker is a separate
-    # Manim process.
-    render_workers: int = 1
+    # Two workers are the safe default for laptop CPUs. A measured 12-thread
+    # mobile i7 run with four workers pushed ordinary 10-second scenes past the
+    # timeout together. Raise RENDER_WORKERS only after host benchmarking.
+    render_workers: int = 2
 
 
 def get_visual_config() -> VisualConfig:
@@ -452,12 +454,13 @@ def get_visual_config() -> VisualConfig:
     return VisualConfig(
         storyboard_enabled=_env_bool("STORYBOARD_ENABLED", True),
         visual_repair_attempts=max(0, _env_int("VISUAL_REPAIR_ATTEMPTS", 1)),
+        auto_repair_advisory_qa=_env_bool("AUTO_REPAIR_ADVISORY_QA", False),
         contact_sheet_enabled=_env_bool("CONTACT_SHEET_ENABLED", True),
         visual_qa_enabled=_env_bool("VISUAL_QA_ENABLED", True),
         global_style=_env("GLOBAL_VISUAL_STYLE", DEFAULT_GLOBAL_VISUAL_STYLE),
         manim_quality=_env("MANIM_QUALITY", "low").lower(),
         frames_per_scene=max(1, _env_int("QA_FRAMES_PER_SCENE", 12)),
-        render_workers=max(1, min(8, _env_int("RENDER_WORKERS", 1))),
+        render_workers=max(1, min(8, _env_int("RENDER_WORKERS", 2))),
         blank_content_ratio=_env_float("QA_BLANK_CONTENT_RATIO", 0.0025),
         white_min_brightness=_env_float("QA_WHITE_MIN_BRIGHTNESS", 247.0),
         min_stddev=_env_float("QA_MIN_STDDEV", 1.5),

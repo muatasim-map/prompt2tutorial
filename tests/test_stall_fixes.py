@@ -83,6 +83,7 @@ def test_3d_scene_gets_a_longer_timeout_than_2d(monkeypatch):
     spatial = cv.resolve_compile_timeout(is_3d=True)
     assert spatial > flat
     assert flat == 120                     # unchanged 2D default
+    assert spatial == 210                  # enough for real 3D; not a 300s stall
 
 
 def test_explicit_override_still_gets_3d_allowance(monkeypatch):
@@ -187,11 +188,11 @@ def test_listed_colors_are_real_manim_constants(name):
 
 def test_scene_compile_budget_constant_is_generous_but_finite():
     import video_generator as vg
-    # Must exceed the worst case of 3 back-to-back 3D timeouts, or it would
-    # fire before the existing per-attempt timeout logic ever gets a chance.
-    worst_case_3_attempts = cv.resolve_compile_timeout(is_3d=True) * 3
+    # Timeout handling allows one simplification repair, not three full stalls.
+    worst_case_2_attempts = cv.resolve_compile_timeout(is_3d=True) * 2
     assert vg._SCENE_COMPILE_BUDGET_SECONDS > 0
-    assert vg._SCENE_COMPILE_BUDGET_SECONDS >= worst_case_3_attempts
+    assert vg._SCENE_COMPILE_BUDGET_SECONDS >= worst_case_2_attempts
+    assert vg._SCENE_COMPILE_BUDGET_SECONDS <= 480
 
 
 def test_is_timeout_error_detects_the_compile_timeout_message():

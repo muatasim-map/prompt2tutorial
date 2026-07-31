@@ -108,6 +108,12 @@ Automatic educational video generator using AI and Manim. Converts any topic int
 - **FFmpeg-based** audio concatenation, video concatenation, and muxing with an
   **FFprobe validation gate** before a job is marked complete
 - **Educational animations** with Manim Community Edition
+- **Eight explanation modes** — preserve the existing balanced `general` flow or
+  choose conceptual intuition, worked example, visual proof, graphical
+  exploration, exam technique, misconception repair, or revision recap.
+- **Optional AQA A-level Mathematics profile** — adds AQA 7357 terminology,
+  mathematical reasoning, problem-solving, modelling, and visual-accuracy
+  guidance without changing the default general-purpose behavior.
 - **Multi-language support** (automatically detects topic language)
 
 ## Requirements
@@ -190,6 +196,46 @@ For job `<job_id>` (all served under `/media/...`):
 | Final MP4 | `media/jobs/<job_id>/final/output_<job_id>.mp4` |
 
 Their URLs are also surfaced in the job status `metadata` (and logged in the UI).
+
+## Explanation modes
+
+The existing behavior remains the default:
+
+```json
+{
+  "topic": "Explain Newton-Raphson iteration",
+  "explanation_mode": "general",
+  "curriculum_profile": "general"
+}
+```
+
+For an AQA-focused graphical lesson, send:
+
+```json
+{
+  "topic": "Explain Newton-Raphson iteration and when it can fail",
+  "target_duration": 90,
+  "explanation_mode": "graphical_exploration",
+  "curriculum_profile": "aqa_a_level_mathematics"
+}
+```
+
+Valid `explanation_mode` values are:
+
+- `general`
+- `conceptual_intuition`
+- `worked_example`
+- `derivation_visual_proof`
+- `graphical_exploration`
+- `exam_technique`
+- `misconception_repair`
+- `revision_recap`
+
+Valid `curriculum_profile` values are `general` and
+`aqa_a_level_mathematics`. These values are part of both the script and scene
+cache keys, so one teaching approach can never reuse another approach's output.
+The choices are also stored in the job manifest and returned by the generation
+API.
 
 ## Per-job media layout
 
@@ -346,13 +392,58 @@ cp .env.example .env
 Start the Flask server:
 
 ```bash
-python src/main.py
+python run.py
 ```
+
+`run.py` automatically re-runs with `.venv\Scripts\python.exe` when the
+project virtual environment exists, so Flask is loaded from the project's
+installed dependencies.
+
+On Windows, if `python` is not on PATH, use:
+
+```bash
+py run.py
+```
+
+You can also invoke the virtual environment directly:
+
+```powershell
+.venv\Scripts\python.exe run.py
+```
+
+Equivalent npm-style shortcut:
+
+```bash
+npm run dev
+```
+
+`npm run dev` only delegates to the Python/Flask server; npm is not used to
+build the frontend. It runs the same launcher as `python run.py`.
+
+Restart the command after Python source changes because the
+server intentionally disables Flask's auto-reloader to preserve long-running
+job state.
 
 Then open your browser and navigate to:
 ```
 http://localhost:5000
 ```
+
+### Reliability and recovery
+
+- `GET /api/health` reports Python package, FFmpeg/FFprobe, Manim, API-key,
+  and source-build readiness. Generation fails early with
+  `environment_not_ready` when required dependencies are missing.
+- Every job continuously writes an atomic state snapshot to
+  `media/jobs/<job_id>/logs/manifest.json`.
+- Generated Manim payloads are checked for valid Python syntax, a Manim import,
+  and the declared `Scene` subclass before rendering.
+- `POST /api/generate/retry` retries a failed reviewed job. Successful TTS and
+  scene artifacts are reused through the content-addressed caches.
+- Job metadata exposes `stage_seconds`, `cache_stats`, provider usage, token
+  counts, TTS characters, and estimated cost.
+- The review studio remains the approval gate before TTS, storyboard generation,
+  Manim rendering, and FFmpeg assembly begin.
 
 or 
 

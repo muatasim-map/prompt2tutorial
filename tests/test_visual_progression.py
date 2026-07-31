@@ -134,12 +134,27 @@ def test_duration_sync_writes_timing_record(tmp_path):
     assert "self.wait(_pad)" in out
 
 
+def test_duration_sync_replaces_terminal_hold_with_measured_audio_padding(tmp_path):
+    code = """from manim import *
+class A(Scene):
+    def construct(self):
+        self.play(Create(Circle()), run_time=2.0)
+        self.wait(3.25)
+"""
+    out = vg.append_duration_sync(code, 2.5, tmp_path / "t.json")
+
+    assert "self.wait(3.25)" not in out
+    assert "self.play(Create(Circle()), run_time=2.0)" in out
+    assert "_target = 2.5000" in out
+    compile(out, "<duration-sync>", "exec")
+
+
 def test_duration_sync_noop_without_audio():
     code = "class A(Scene):\n    def construct(self):\n        pass\n"
     assert vg.append_duration_sync(code, None) == code
 
 
-def test_static_end_padding_flagged_and_triggers_repair(tmp_path):
+def test_static_end_padding_is_flagged_for_review(tmp_path):
     ws = JobWorkspace("timing-job", base_dir=tmp_path).create()
     ws.scene_timing(1).write_text(json.dumps(
         {"animation_seconds": 4.0, "target_seconds": 9.0, "pad_seconds": 5.0}), encoding="utf-8")

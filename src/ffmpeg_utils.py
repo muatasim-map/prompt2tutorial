@@ -9,10 +9,13 @@ Design choices:
 * Audio fragments are concatenated **and re-encoded** to a single normalized
   AAC/m4a track (44.1 kHz stereo) — replacing the previous invalid binary MP3
   concatenation.
-* Scene videos are concatenated by re-encoding to a uniform H.264 / yuv420p
-  stream, guaranteeing compatible settings without fragile raw-packet edits.
-* The final mux copies the (already H.264) video, encodes AAC audio, and adds
-  ``-movflags +faststart`` with a browser-friendly pixel format.
+* Scene videos use a lossless-to-source stream-copy fast path because every
+  clip in a job is rendered by the same Manim quality preset. If FFmpeg reports
+  incompatible inputs, assembly automatically falls back to the prior uniform
+  H.264 / yuv420p transcode instead of risking a broken output.
+* The final mux copies the already-normalized H.264 video and AAC narration,
+  avoiding a second lossy AAC encode. It falls back to audio transcoding only
+  for an incompatible external track.
 * The final output is validated with FFprobe before a job is marked complete.
 """
 
@@ -67,7 +70,24 @@ def build_concat_audio_cmd(list_file: str | os.PathLike, output: str | os.PathLi
 
 
 def build_concat_video_cmd(list_file: str | os.PathLike, output: str | os.PathLike) -> List[str]:
-    """Concatenate scene videos, re-encoding to a uniform H.264 / yuv420p stream."""
+    """Concatenate compatible Manim scenes without decoding or re-encoding."""
+    return [
+        FFMPEG_BIN, "-hide_banner", "-y",
+        "-f", "concat", "-safe", "0",
+        "-i", str(list_file),
+        "-map", "0:v:0",
+        "-c:v", "copy",
+        "-an",
+        "-movflags", "+faststart",
+        str(output),
+    ]
+
+
+def build_concat_video_transcode_cmd(
+    list_file: str | os.PathLike,
+    output: str | os.PathLike,
+) -> List[str]:
+    """Compatibility fallback: normalize scenes to H.264 / yuv420p."""
     return [
         FFMPEG_BIN, "-hide_banner", "-y",
         "-f", "concat", "-safe", "0",
@@ -75,6 +95,7 @@ def build_concat_video_cmd(list_file: str | os.PathLike, output: str | os.PathLi
         "-c:v", "libx264", "-preset", "medium", "-crf", "23",
         "-pix_fmt", "yuv420p",
         "-an",
+        "-movflags", "+faststart",
         str(output),
     ]
 
@@ -84,7 +105,25 @@ def build_mux_cmd(
     audio: str | os.PathLike,
     output: str | os.PathLike,
 ) -> List[str]:
-    """Mux an (H.264) video with a narration track into a faststart MP4."""
+    """Mux normalized H.264 + AAC streams into a faststart MP4 without loss."""
+    return [
+        FFMPEG_BIN, "-hide_banner", "-y",
+        "-i", str(video),
+        "-i", str(audio),
+        "-map", "0:v:0", "-map", "1:a:0",
+        "-c:v", "copy",
+        "-c:a", "copy",
+        "-movflags", "+faststart",
+        str(output),
+    ]
+
+
+def build_mux_transcode_audio_cmd(
+    video: str | os.PathLike,
+    audio: str | os.PathLike,
+    output: str | os.PathLike,
+) -> List[str]:
+    """Compatibility fallback that copies video and normalizes audio to AAC."""
     return [
         FFMPEG_BIN, "-hide_banner", "-y",
         "-i", str(video),
@@ -175,7 +214,14 @@ def concat_video(
     list_file: str | os.PathLike,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> bool:
-    """Concatenate scene videos into one silent H.264 clip (order preserved)."""
+    """Concatenate scene videos in order, preferring quality-preserving copy.
+
+    Manim scenes from one job share codec, resolution, frame rate, and pixel
+    format. Copying their encoded packets avoids a redundant full-video
+    transcode and cannot reduce image quality. The former normalization path
+    remains as an automatic fallback for legacy or externally supplied clips
+    whose streams are incompatible.
+    """
     if not video_paths:
         raise FFmpegError("no videos to concatenate")
     list_path = Path(list_file)
@@ -184,8 +230,22 @@ def concat_video(
         raise FFmpegError("all scene videos are missing on disk")
 
     result = _run(build_concat_video_cmd(list_path, output_path), timeout=timeout)
-    if result.returncode != 0 or not os.path.exists(output_path):
-        raise FFmpegError(f"video concat failed: {_tail(result.stderr)}")
+    if result.returncode == 0 and os.path.exists(output_path):
+        return True
+
+    copy_error = _tail(result.stderr)
+    try:
+        Path(output_path).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+    fallback = _run(
+        build_concat_video_transcode_cmd(list_path, output_path),
+        timeout=timeout,
+    )
+    if fallback.returncode != 0 or not os.path.exists(output_path):
+        details = _tail(fallback.stderr) or copy_error
+        raise FFmpegError(f"video concat failed: {details}")
     return True
 
 
@@ -195,14 +255,28 @@ def mux_video_audio(
     output_path: str | os.PathLike,
     timeout: int = DEFAULT_TIMEOUT,
 ) -> bool:
-    """Mux video + audio into a browser-compatible faststart MP4."""
+    """Mux video + normalized narration, with an audio-transcode fallback."""
     if not os.path.exists(video_path):
         raise FFmpegError(f"video not found: {video_path}")
     if not os.path.exists(audio_path):
         raise FFmpegError(f"audio not found: {audio_path}")
     result = _run(build_mux_cmd(video_path, audio_path, output_path), timeout=timeout)
-    if result.returncode != 0 or not os.path.exists(output_path):
-        raise FFmpegError(f"mux failed: {_tail(result.stderr)}")
+    if result.returncode == 0 and os.path.exists(output_path):
+        return True
+
+    copy_error = _tail(result.stderr)
+    try:
+        Path(output_path).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+    fallback = _run(
+        build_mux_transcode_audio_cmd(video_path, audio_path, output_path),
+        timeout=timeout,
+    )
+    if fallback.returncode != 0 or not os.path.exists(output_path):
+        details = _tail(fallback.stderr) or copy_error
+        raise FFmpegError(f"mux failed: {details}")
     return True
 
 

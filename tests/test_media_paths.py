@@ -56,6 +56,46 @@ def test_cache_key_changes_with_model():
     assert k1 != k2
 
 
+def test_scene_cache_isolated_by_explanation_mode_and_curriculum():
+    common = dict(
+        text="Find a root",
+        animation="Show a tangent",
+        index=1,
+        previous_context=None,
+        provider="gemini",
+        model="test-model",
+        audio_duration=8,
+    )
+
+    general_key = compute_scene_cache_key(**common)
+    exam_key = compute_scene_cache_key(
+        **common,
+        explanation_mode="exam_technique",
+        curriculum_profile="aqa_a_level_mathematics",
+    )
+
+    assert general_key != exam_key
+
+
+def test_scene_cache_isolated_by_render_quality(monkeypatch):
+    common = dict(
+        text="Explain a tangent",
+        animation="Draw a changing tangent",
+        index=1,
+        previous_context=None,
+        provider="gemini",
+        model="test-model",
+        audio_duration=8,
+    )
+
+    monkeypatch.setenv("MANIM_QUALITY", "low")
+    low_key = compute_scene_cache_key(**common)
+    monkeypatch.setenv("MANIM_QUALITY", "high")
+    high_key = compute_scene_cache_key(**common)
+
+    assert low_key != high_key
+
+
 def test_caches_live_outside_job_dirs():
     # Reusable caches must not sit inside the per-job tree.
     assert media_paths.JOBS_DIR not in media_paths.SCENE_CACHE_DIR.parents

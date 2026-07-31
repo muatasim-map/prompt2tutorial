@@ -40,6 +40,7 @@ from manim import (
     Text,
     VGroup,
     config,
+    smooth,
 )
 
 # --------------------------------------------------------------------------- #
@@ -57,6 +58,16 @@ PALETTE = {
     "text": WHITE,
     "alt": PURPLE,
 }
+
+TYPE_SCALE = {
+    "hero": 60,
+    "title": 48,
+    "section": 36,
+    "body": 30,
+    "label": 26,
+    "caption": 22,
+}
+MIN_READABLE_FONT_SIZE = TYPE_SCALE["caption"]
 
 # Safe drawing area = frame minus a margin so nothing clips off-screen at 1080p.
 SAFE_MARGIN = 0.6
@@ -86,7 +97,7 @@ def fit_to_frame(mobject, max_width: float | None = None, max_height: float | No
 # --------------------------------------------------------------------------- #
 
 
-def styled_title(text: str, color=WHITE, font_size: int = 48):
+def styled_title(text: str, color=WHITE, font_size: int = TYPE_SCALE["title"]):
     """A short, readable title placed toward the top with a safe margin."""
     title = Text(str(text), color=color, font_size=font_size, weight="BOLD")
     fit_to_frame(title, max_width=safe_width())
@@ -94,14 +105,14 @@ def styled_title(text: str, color=WHITE, font_size: int = 48):
     return title
 
 
-def body_text(text: str, color=WHITE, font_size: int = 30):
+def body_text(text: str, color=WHITE, font_size: int = TYPE_SCALE["body"]):
     """A single-line body label, auto-fitted to the safe width."""
     label = Text(str(text), color=color, font_size=font_size)
     fit_to_frame(label, max_width=safe_width())
     return label
 
 
-def caption(text: str, color=GREY, font_size: int = 24):
+def caption(text: str, color=GREY, font_size: int = TYPE_SCALE["caption"]):
     """A small caption anchored near the bottom safe margin."""
     cap = Text(str(text), color=color, font_size=font_size)
     fit_to_frame(cap, max_width=safe_width())
@@ -187,6 +198,30 @@ def prob_bar(value: float, max_value: float = 1.0, color=GREEN, width: float = 4
 def highlight(mobject, color=YELLOW, buff: float = 0.12):
     """A rounded highlight rectangle around ``mobject`` (add + play Create)."""
     return SurroundingRectangle(mobject, color=color, buff=buff, corner_radius=0.1)
+
+
+def focus_on(scene, target, context, scale_factor: float = 1.06,
+             context_opacity: float = 0.28, run_time: float = 0.6):
+    """Lead attention calmly by lifting one object and dimming its context."""
+    scene.play(
+        target.animate.scale(scale_factor).set_opacity(1.0),
+        context.animate.set_opacity(context_opacity),
+        run_time=run_time,
+        rate_func=smooth,
+    )
+    return target
+
+
+def restore_focus(scene, target, context, scale_factor: float = 1.06,
+                  run_time: float = 0.5):
+    """Restore a composition after :func:`focus_on` without removing objects."""
+    scene.play(
+        target.animate.scale(1.0 / scale_factor),
+        context.animate.set_opacity(1.0),
+        run_time=run_time,
+        rate_func=smooth,
+    )
+    return target
 
 
 def row(*mobjects, gap: float = 0.6):
@@ -319,8 +354,10 @@ def make_array_grid(
 
 
 __all__ = [
-    "PALETTE", "SAFE_MARGIN", "safe_width", "safe_height", "fit_to_frame",
+    "PALETTE", "TYPE_SCALE", "MIN_READABLE_FONT_SIZE", "SAFE_MARGIN",
+    "safe_width", "safe_height", "fit_to_frame",
     "styled_title", "body_text", "caption", "make_node", "make_box", "connect",
     "token_chip", "prob_bar", "highlight", "row", "column", "grid",
-    "morph", "reveal", "clear_scene", "make_code_terminal", "make_array_grid",
+    "focus_on", "restore_focus", "morph", "reveal", "clear_scene",
+    "make_code_terminal", "make_array_grid",
 ]

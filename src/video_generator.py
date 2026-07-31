@@ -9,9 +9,11 @@ in-process ``jobs`` dict (swap for Redis/DB in production).
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
+import re
 import shutil
 import threading
 import time
@@ -52,6 +54,10 @@ from config import (
 )
 from ffmpeg_utils import FFmpegError, validate_output
 from llm_service import LLMError, LLMService
+from learning_profiles import (
+    normalize_curriculum_profile,
+    normalize_explanation_mode,
+)
 from media_paths import (
     CACHE_VERSION,
     PROJECT_ROOT,
@@ -60,7 +66,12 @@ from media_paths import (
     JobWorkspace,
     ensure_base_dirs,
 )
-from schemas import ScriptValidationError, parse_script, validate_target_duration
+from schemas import (
+    ScriptValidationError,
+    parse_script,
+    repair_mojibake,
+    validate_target_duration,
+)
 from tts_generator import generate_complete_audio
 from visual_ledger import LedgerEntry, VisualLedger
 
@@ -68,6 +79,7 @@ load_dotenv()
 
 # Global job storage (in production, use Redis or a database).
 jobs: dict = {}
+_manifest_lock = threading.RLock()
 
 
 # --------------------------------------------------------------------------- #
@@ -94,6 +106,89 @@ def build_provider_client(provider: str) -> Any:
 _MAX_JOB_MESSAGES = 2000
 
 
+def _public_job_snapshot(job: dict) -> dict:
+    """Return the JSON-safe portion of a job used by the durable manifest."""
+    return {
+        key: value
+        for key, value in job.items()
+        if not key.startswith("_")
+    }
+
+
+def _persist_job_manifest(job_id: str) -> None:
+    """Atomically persist current job state; diagnostics must never stop a job."""
+    job = jobs.get(job_id)
+    if not job:
+        return
+    try:
+        with _manifest_lock:
+            ws = JobWorkspace(job_id)
+            ws.logs.mkdir(parents=True, exist_ok=True)
+            target = ws.manifest_file()
+            temporary = target.with_suffix(
+                f".{os.getpid()}.{threading.get_ident()}.tmp"
+            )
+            payload = {
+                "schema_version": 1,
+                "written_at": datetime.now().isoformat(),
+                "job": _public_job_snapshot(job),
+            }
+            temporary.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+                encoding="utf-8",
+            )
+            temporary.replace(target)
+    except Exception:
+        pass
+
+
+_SAFE_JOB_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
+
+
+def _restore_job_from_manifest(job_id: str) -> dict | None:
+    """Restore a durable job record after the Flask process restarts."""
+    if not isinstance(job_id, str) or not _SAFE_JOB_ID_PATTERN.fullmatch(job_id):
+        return None
+
+    existing = jobs.get(job_id)
+    if existing is not None:
+        return existing
+
+    manifest_path = JobWorkspace(job_id).manifest_file()
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+        return None
+
+    restored_job = payload.get("job")
+    if not isinstance(restored_job, dict) or restored_job.get("job_id") != job_id:
+        return None
+
+    if restored_job.get("status") in {"queued", "running"}:
+        restored_job["status"] = "failed"
+        restored_job["error"] = "Generation was interrupted by a server restart."
+        restored_job["error_category"] = "server_restarted"
+        metadata = restored_job.setdefault("metadata", {})
+        if isinstance(metadata, dict):
+            metadata["recovery_available"] = bool(restored_job.get("video_data"))
+
+    jobs[job_id] = restored_job
+    return restored_job
+
+
+def _record_cache_result(job_id: str, layer: str, hit: bool) -> None:
+    """Increment per-job cache observability counters."""
+    job = jobs.setdefault(job_id, {})
+    metadata = job.setdefault("metadata", {})
+    stats = metadata.setdefault("cache_stats", {})
+    key = f"{layer}_{'hits' if hit else 'misses'}"
+    stats[key] = int(stats.get(key, 0)) + 1
+    _persist_job_manifest(job_id)
+
+
 def update_job_status(
     job_id: str,
     status: Optional[str] = None,
@@ -109,6 +204,16 @@ def update_job_status(
     if job_id not in jobs:
         jobs[job_id] = {}
     job = jobs[job_id]
+
+    now = time.time()
+    if current_step and current_step != job.get("current_step"):
+        previous_step = job.get("current_step")
+        previous_started = job.get("_stage_started_at")
+        if previous_step and previous_started:
+            elapsed = max(0.0, now - float(previous_started))
+            timings = job.setdefault("metadata", {}).setdefault("stage_seconds", {})
+            timings[previous_step] = round(float(timings.get(previous_step, 0)) + elapsed, 2)
+        job["_stage_started_at"] = now
 
     if status:
         job["status"] = status
@@ -138,7 +243,16 @@ def update_job_status(
     if meta:
         job.setdefault("metadata", {}).update(meta)
 
+    if status in {"completed", "failed"} and job.get("_stage_started_at"):
+        active_step = job.get("current_step")
+        if active_step:
+            elapsed = max(0.0, now - float(job["_stage_started_at"]))
+            timings = job.setdefault("metadata", {}).setdefault("stage_seconds", {})
+            timings[active_step] = round(float(timings.get(active_step, 0)) + elapsed, 2)
+        job.pop("_stage_started_at", None)
+
     job["updated_at"] = datetime.now().isoformat()
+    _persist_job_manifest(job_id)
 
 
 def _job_selection(job_id: str, llm_provider: str):
@@ -461,6 +575,70 @@ def _make_llm_status(job_id: str):
 # --------------------------------------------------------------------------- #
 
 
+def _cap_terminal_wait(code_content: str, target_seconds: float) -> str:
+    """Cap a final numeric ``self.wait`` at the narration boundary.
+
+    Generated scenes sometimes get the animation arithmetic right and then add
+    a long final hold anyway. The old duration shim could only add time, so that
+    hold pushed every following scene later than its narration. Replacing only
+    the terminal hold preserves every explanatory animation while preventing
+    the overrun.
+    """
+    try:
+        tree = ast.parse(code_content)
+    except SyntaxError:
+        return code_content
+
+    terminal = None
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        construct = next(
+            (
+                item for item in node.body
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and item.name == "construct"
+            ),
+            None,
+        )
+        if not construct or not construct.body:
+            continue
+        candidate = construct.body[-1]
+        if not isinstance(candidate, ast.Expr) or not isinstance(candidate.value, ast.Call):
+            continue
+        call = candidate.value
+        if (
+            isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "self"
+            and call.func.attr == "wait"
+            and call.args
+            and isinstance(call.args[0], ast.Constant)
+            and isinstance(call.args[0].value, (int, float))
+        ):
+            terminal = candidate
+            requested = float(call.args[0].value)
+            break
+
+    if terminal is None:
+        return code_content
+
+    lines = code_content.splitlines()
+    original = lines[terminal.lineno - 1]
+    indent = original[: len(original) - len(original.lstrip())]
+    replacement = [
+        f"{indent}# Cap the terminal hold at the measured narration boundary.",
+        f"{indent}_p2l_before_hold = (self.renderer.time if "
+        f"(hasattr(self, 'renderer') and self.renderer) else self.time)",
+        f"{indent}_p2l_hold_remaining = max(0.0, {target_seconds:.4f} - _p2l_before_hold)",
+        f"{indent}if _p2l_hold_remaining > 0:",
+        f"{indent}    self.wait(min({requested:.4f}, _p2l_hold_remaining))",
+    ]
+    end = terminal.end_lineno or terminal.lineno
+    lines[terminal.lineno - 1:end] = replacement
+    return "\n".join(lines)
+
+
 def append_duration_sync(
     code_content: str,
     audio_duration: Optional[float],
@@ -476,6 +654,7 @@ def append_duration_sync(
     if not audio_duration:
         return code_content
 
+    code_content = _cap_terminal_wait(code_content, float(audio_duration))
     lines = code_content.splitlines()
     construct_line_idx = -1
     indentation = "        "
@@ -525,6 +704,8 @@ def append_duration_sync(
 def compute_scene_cache_key(
     text, animation, index, previous_context, provider, model, audio_duration,
     chapter=None, objective=None, explanation=None, visual_key=None,
+    explanation_mode="general", curriculum_profile="general",
+    render_quality=None,
 ) -> str:
     """Deterministic SHA-256 cache key over all scene inputs (+ cache version).
 
@@ -538,6 +719,12 @@ def compute_scene_cache_key(
             "metaphor": previous_context.get("metaphor"),
             "ending_state": previous_context.get("ending_state"),
         }
+    effective_quality = (
+        str(render_quality or os.getenv("MANIM_QUALITY", "low")).strip().lower()
+    )
+    if effective_quality not in {"low", "medium", "high"}:
+        effective_quality = "low"
+
     hash_data = {
         "cache_version": CACHE_VERSION,
         "text": text,
@@ -551,6 +738,9 @@ def compute_scene_cache_key(
         "objective": objective,
         "explanation": explanation,
         "visual_key": visual_key,
+        "explanation_mode": explanation_mode,
+        "curriculum_profile": curriculum_profile,
+        "render_quality": effective_quality,
     }
     serialized = json.dumps(hash_data, sort_keys=True)
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
@@ -564,6 +754,7 @@ def compute_scene_cache_key(
 def generate_script_workflow(
     job_id, topic, enable_tts, llm_provider, tts_provider=None, tts_voice=None,
     tts_rate=None, bypass_cache=False, bypass_scene_cache=False, target_duration=60,
+    explanation_mode="general", curriculum_profile="general",
 ):
     """Background worker: generate + validate the script, then await review."""
     try:
@@ -595,6 +786,8 @@ def generate_script_workflow(
             "provider": provider,
             "model": roles.script,
             "target_duration": target_duration,
+            "explanation_mode": explanation_mode,
+            "curriculum_profile": curriculum_profile,
         }
         script_cache_key = hashlib.sha256(
             json.dumps(script_hash, sort_keys=True).encode("utf-8")
@@ -607,21 +800,27 @@ def generate_script_workflow(
             try:
                 with open(cached_script_json, "r", encoding="utf-8") as f:
                     cached = json.load(f)
-                # Re-validate cached content before trusting it.
+                # Re-validate both schema and duration before trusting it. Old
+                # short scripts must become misses, not poison repeated jobs.
                 video_data = parse_script(cached).as_scene_dicts()
+                animations.validate_script_duration(video_data, target_duration)
                 update_job_status(job_id, meta={"cache": "hit"},
                                   message=f"Reused cached script (key {script_cache_key[:8]})")
-            except (ScriptValidationError, Exception) as exc:
+                _record_cache_result(job_id, "script", True)
+            except Exception as exc:
                 print(f"  [WARNING] Ignoring invalid cached script: {exc}")
                 video_data = None
 
         if not video_data:
+            _record_cache_result(job_id, "script", False)
             update_job_status(job_id, progress=10, current_step="script",
                               meta={"cache": "miss"},
                               message=f"Generating script with {provider} ({roles.script})...")
             video_data = animations.generate_script(
                 service=service, topic_name=topic, provider=provider,
                 client=client, target_duration=target_duration, status=status_sink,
+                explanation_mode=explanation_mode,
+                curriculum_profile=curriculum_profile,
             )
             try:
                 SCRIPT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -741,12 +940,25 @@ _CORE_PROMPT_CHARS = _measure_core_prompt_chars()
 # 3x the per-attempt timeout (see resolve_compile_timeout) before any repair
 # call is even made, so this is set generously above that worst case rather
 # than tightened — the point is a backstop, not a new bottleneck.
-_SCENE_COMPILE_BUDGET_SECONDS = 900.0  # 15 minutes
+_SCENE_COMPILE_BUDGET_SECONDS = 480.0  # 8 minutes, including one timeout repair
 
 
 def _is_timeout_error(compile_error: Optional[str]) -> bool:
     """Detect our own compile-timeout message (see concat_video.compile_video)."""
     return bool(compile_error) and "Timeout: compilation exceeded" in compile_error
+
+
+def _should_use_fallback_card(compile_error: Optional[str]) -> bool:
+    """Use emergency cards for broken code, never for slow teaching visuals."""
+    return bool(compile_error) and not _is_timeout_error(compile_error)
+
+
+def _compile_error_signature(compile_error: Optional[str]) -> str:
+    """Stable signature used to stop repairs that reproduce the same failure."""
+    if not compile_error:
+        return ""
+    lines = [line.strip() for line in str(compile_error).splitlines() if line.strip()]
+    return lines[-1] if lines else ""
 
 
 def _apply_text_morph_gate(
@@ -902,6 +1114,85 @@ def _apply_motion_gate(
         return code, class_name
 
 
+def _apply_static_code_flags(report: dict, code: str) -> None:
+    """Attach cheap, deterministic typography/composition findings to scene QA."""
+    try:
+        facts = scene_checks.analyze_scene_code(code)
+        flags = facts.static_quality_flags
+        report.setdefault("flags", []).extend(
+            flag for flag in flags if flag not in report["flags"]
+        )
+        report["static_code_quality"] = {
+            "text_mobject_count": facts.text_mobject_count,
+            "small_text_sizes": facts.small_text_sizes,
+            "long_text_count": len(facts.long_text_literals),
+            "flags": flags,
+        }
+    except Exception as exc:  # pragma: no cover - advisory QA must never fail a job
+        print(f"[STATICQA] skipped: {exc}")
+
+
+_ACTIONABLE_VISUAL_FLAGS = {
+    visual_qa.FLAG_LONG_STATIC_RUN,
+    visual_qa.FLAG_NO_CHANGE,
+    visual_qa.FLAG_EDGE_CLIP,
+    scene_checks.FLAG_SMALL_TEXT,
+    scene_checks.FLAG_TEXT_DENSITY,
+}
+
+
+def _visual_repair_reason(
+    report: dict, audio_duration: float, *, allow_advisory: bool = False,
+):
+    """Return (short reason, regeneration feedback), or None when QA is acceptable."""
+    if report.get("blank"):
+        return (
+            "the rendered frame was blank or near-empty",
+            "The rendered frame was blank or near-empty. Ensure clearly visible, "
+            "well-framed content and meaningful motion.",
+        )
+    if not allow_advisory:
+        return None
+    if report.get("static_end_padding"):
+        pad = float(report.get("pad_seconds", 0.0))
+        anim = float(report.get("animation_seconds", 0.0))
+        return (
+            f"the animation froze for {pad:.1f}s at the end",
+            f"The animation filled only {anim:.1f}s of the required "
+            f"{audio_duration:.1f}s, leaving a frozen final frame for {pad:.1f}s. "
+            "Spread meaningful visual beats across the full narration, with a "
+            "change every 2-4 seconds. Do not use a long self.wait().",
+        )
+
+    actionable = set(report.get("flags") or []) & _ACTIONABLE_VISUAL_FLAGS
+    if not actionable:
+        return None
+
+    problems, fixes = [], []
+    if visual_qa.FLAG_LONG_STATIC_RUN in actionable:
+        problems.append("a long static passage")
+        fixes.append("add restrained visual progression during the static passage")
+    if visual_qa.FLAG_NO_CHANGE in actionable:
+        problems.append("insufficient meaningful visual change")
+        fixes.append("use persistent-object transformations or focused emphasis")
+    if scene_checks.FLAG_SMALL_TEXT in actionable:
+        problems.append("font size below the readability minimum")
+        fixes.append("increase the affected font size and simplify nearby content")
+    if scene_checks.FLAG_TEXT_DENSITY in actionable:
+        problems.append("too many text objects")
+        fixes.append("reduce text objects and reveal only the current teaching point")
+    if visual_qa.FLAG_EDGE_CLIP in actionable:
+        problems.append("content too close to the frame edge")
+        fixes.append("recompose and scale content inside safe frame margins")
+
+    return (
+        ", ".join(problems),
+        "Visual QA found " + "; ".join(problems) + ". Fix only these issues: "
+        + "; ".join(fixes)
+        + ". Preserve the explanation, duration, semantic colors, and narration order.",
+    )
+
+
 def _domain_routing_audit(
     index, storyboard_entry, scene, audio_duration,
     previous_context, global_style, ledger_summary,
@@ -934,6 +1225,7 @@ def _domain_routing_audit(
             "scene": index,
             "primary_domain_tag": tags[0],
             "secondary_domain_tags": tags[1:],
+            "a_level_math_topic": (storyboard_entry or {}).get("a_level_math_topic"),
             "dimension": dimension,
             "scene_kind": (storyboard_entry or {}).get("scene_kind") or "explanation",
             "narrative_role": (storyboard_entry or {}).get("narrative_role") or "standalone",
@@ -946,6 +1238,7 @@ def _domain_routing_audit(
         return {
             "scene": index, "primary_domain_tag": "general",
             "secondary_domain_tags": [], "dimension": "2d",
+            "a_level_math_topic": None,
             "scene_kind": "explanation", "narrative_role": "standalone",
             "injected_modules": ["general"], "prompt_chars": 0,
             "prompt_tokens_estimate": 0,
@@ -953,9 +1246,56 @@ def _domain_routing_audit(
         }
 
 
+def _generate_fallback_card_code(scene_index: int, storyboard_entry: Optional[dict], duration: float) -> tuple[str, str]:
+    """Generate a clean 2.5D fallback glass card scene.
+
+    Produces bulletproof Manim Python code that creates an Obsidian glass card with
+    the scene title and objective text. Takes ~1s to compile and is guaranteed to
+    succeed, preventing audio desync and dropped scenes.
+    """
+    title_text = (storyboard_entry or {}).get("chapter") or f"Scene {scene_index}"
+    title_clean = title_text.replace("'", "\\'").replace('"', '\\"').replace("\n", " ")
+
+    obj_text = (storyboard_entry or {}).get("objective") or (storyboard_entry or {}).get("text") or "Key Conceptual Point"
+    obj_clean = obj_text.replace("'", "\\'").replace('"', '\\"').replace("\n", " ")
+
+    class_name = f"FallbackCardScene{scene_index}"
+    dur = max(3.0, float(duration or 6.0))
+
+    code = f'''from manim import *
+
+class {class_name}(Scene):
+    def construct(self):
+        glow = Circle(radius=3.5, color=BLUE_E, fill_opacity=0.1, stroke_opacity=0)
+        self.add(glow)
+
+        card = RoundedRectangle(corner_radius=0.2, width=10.0, height=4.5, color=BLUE_C)
+        card.set_fill(color="#060810", opacity=0.85)
+        card.set_stroke(width=3)
+
+        title = Text("{title_clean[:50]}", font_size=32, color=WHITE)
+        title.next_to(card.get_top(), DOWN, buff=0.4)
+
+        line = Line(start=card.get_left() + RIGHT*0.5, end=card.get_right() + LEFT*0.5, color=BLUE_D, stroke_width=1.5)
+        line.next_to(title, DOWN, buff=0.3)
+
+        body = Text("{obj_clean[:90]}", font_size=24, color=LIGHT_GREY, line_spacing=1.2)
+        body.next_to(line, DOWN, buff=0.4)
+
+        group = VGroup(card, title, line, body)
+        group.move_to(ORIGIN)
+
+        self.play(FadeIn(group, scale=0.95), run_time=1.2)
+        self.play(glow.animate.scale(1.15), run_time=max(1.0, {dur:.2f} - 1.7))
+        self.play(FadeOut(group, scale=0.95), run_time=0.5)
+'''
+    return code, class_name
+
+
 def _generate_and_compile(
     ws, service, provider, client, index, total, job_id, scene, audio_duration,
     previous_context, storyboard_entry, global_style, ledger_summary, regen_feedback=None,
+    explanation_mode="general", curriculum_profile="general",
 ):
     """Generate Manim code (storyboard-directed) and run the compile-fix REPL.
 
@@ -996,6 +1336,8 @@ def _generate_and_compile(
         storyboard_entry=storyboard_entry, global_style=global_style,
         ledger_summary=ledger_summary, regen_feedback=regen_feedback,
         status=_make_llm_status(job_id),
+        explanation_mode=explanation_mode,
+        curriculum_profile=curriculum_profile,
     )
     if manim_res and manim_res.get("raw_received"):
         # Stage 2/6 — response received.
@@ -1072,6 +1414,7 @@ def _generate_and_compile(
     # attempts alone doesn't bound wall time if any single call can stall.
     scene_deadline = time.time() + _SCENE_COMPILE_BUDGET_SECONDS
     timeout_repairs_used = 0
+    previous_error_signature = ""
 
     for iteration in range(3):
         if time.time() > scene_deadline:
@@ -1125,14 +1468,30 @@ def _generate_and_compile(
         # message, so repair-loop effectiveness can be analysed per error type
         # rather than by grepping truncated human strings.
         err_line = str(compile_error).strip().splitlines()[-1] if compile_error else "Unknown render error"
+        error_signature = _compile_error_signature(compile_error)
+        repeated_failure = bool(
+            error_signature and error_signature == previous_error_signature
+        )
+        previous_error_signature = error_signature
         _write_job_log(job_id, "render_attempt", {
             "scene": index, "attempt": iteration + 1, "ok": False,
             "seconds": round(t_elapsed, 2),
             "error_type": err_line.split(":", 1)[0].strip()[:80],
             "error_message": err_line[:500],
             "class_name": current_class, "is_3d": scene_is_3d,
-            "will_repair": bool(compile_error and iteration < 2),
+            "will_repair": bool(
+                compile_error and iteration < 2 and not repeated_failure
+            ),
         })
+        if repeated_failure:
+            update_job_status(
+                job_id,
+                message=(
+                    f"[WARN] [REPL] Scene {index}/{total}: repair reproduced the "
+                    f"same failure ({err_line[:120]}); using the safe fallback"
+                ),
+            )
+            break
         # A timeout is not an ordinary error. Measured over 13 benchmark runs:
         # of 12 scenes that timed out once, 9 timed out again and 8 timed out a
         # third time — the generic repair recovered only 3 of 12 while burning
@@ -1181,10 +1540,14 @@ def _generate_and_compile(
         else:
             break
 
-    # ZERO-RISK FALLBACK CARD: If code compilation failed after all 3 attempts,
-    # render a clean 2.5D Fallback Glass Card. Guarantees 100% video completeness
-    # and 100% audio-video sync with 0 dropped scenes.
-    if not (video_path and os.path.exists(video_path)):
+    # Emergency fallback cards remain useful for unrecoverable source/runtime
+    # errors. A timeout is different: replacing a real explanation with a
+    # static card is a quality regression, so preserve the failure for the
+    # cache-aware "Retry Failed Scenes" flow instead.
+    if (
+        not (video_path and os.path.exists(video_path))
+        and _should_use_fallback_card(compile_error)
+    ):
         print(f"[FALLBACK CARD] Scene {index} failed compilation after retries. Rendering zero-risk Fallback Card...")
         update_job_status(
             job_id, message=f"[WARN] [FALLBACK CARD] Scene {index}/{total}: Rendering zero-risk Fallback Glass Card..."
@@ -1345,6 +1708,7 @@ def _render_scene(
     ws, service, provider, client, index, total, scene, previous_context,
     audio_duration, bypass_scene_cache, job_id, provider_model,
     storyboard_entry, global_style, ledger_summary, vcfg,
+    explanation_mode="general", curriculum_profile="general",
 ):
     """Generate + compile one scene (storyboard-directed) with QA + one visual repair.
 
@@ -1360,6 +1724,9 @@ def _render_scene(
         audio_duration=audio_duration, chapter=scene.get("chapter", ""),
         objective=scene.get("objective", ""), explanation=scene.get("explanation", ""),
         visual_key=visual_key,
+        explanation_mode=explanation_mode,
+        curriculum_profile=curriculum_profile,
+        render_quality=vcfg.manim_quality,
     )
     cache_mp4 = SCENE_CACHE_DIR / f"{cache_key}.mp4"
     cache_py = SCENE_CACHE_DIR / f"{cache_key}.py"
@@ -1374,17 +1741,22 @@ def _render_scene(
             shutil.copyfile(cache_mp4, dest)
             update_job_status(job_id, meta={"cache": "hit", "scene": index, "total_scenes": total},
                               message=f"[OK] [CACHE] Scene {index}/{total}: Reused cached video render (key: {cache_key[:8]})")
+            _record_cache_result(job_id, "scene", True)
             report = _scene_qa(ws, index, str(dest), vcfg, storyboard_entry)
+            _apply_static_code_flags(report, cache_py.read_text(encoding="utf-8"))
             return str(dest), next_ctx, report
         except Exception as exc:
             print(f"  [WARNING] Failed to use cached scene {index}: {exc}")
 
+    _record_cache_result(job_id, "scene", False)
     update_job_status(job_id, meta={"cache": "miss", "scene": index, "total_scenes": total},
                       message=f"→ Scene {index}/{total} (generating storyboard-directed code)")
 
     video_path, code, cls, failure_info = _generate_and_compile(
         ws, service, provider, client, index, total, job_id, scene, audio_duration,
         previous_context, storyboard_entry, global_style, ledger_summary,
+        explanation_mode=explanation_mode,
+        curriculum_profile=curriculum_profile,
     )
     if not (video_path and os.path.exists(video_path)):
         if failure_info:
@@ -1398,44 +1770,43 @@ def _render_scene(
 
     shutil.copyfile(video_path, dest)
     report = _scene_qa(ws, index, str(dest), vcfg, storyboard_entry)
+    _apply_static_code_flags(report, code)
     _apply_timing_flags(ws, index, report, audio_duration, vcfg)
 
-    # --- one scene-level visual repair when the render is blank OR ends in a
-    # long frozen tail (the measured cause of static-looking videos) --------- #
-    needs_repair = report.get("blank") or report.get("static_end_padding")
-    if needs_repair and vcfg.visual_repair_attempts > 0 and vcfg.visual_qa_enabled:
+    # --- bounded repair for actionable render and static-code QA findings --- #
+    allow_advisory = bool(getattr(vcfg, "auto_repair_advisory_qa", False))
+    # A fallback is already the bounded recovery result. Never send it through
+    # another LLM generation/render cycle merely for advisory aesthetics.
+    if cls.startswith("FallbackCardScene"):
+        allow_advisory = False
+    repair_reason = _visual_repair_reason(
+        report, audio_duration, allow_advisory=allow_advisory
+    )
+    if repair_reason and vcfg.visual_repair_attempts > 0 and vcfg.visual_qa_enabled:
         for attempt in range(vcfg.visual_repair_attempts):
-            if report.get("blank"):
-                why = "the previously rendered frame was blank/near-empty"
-                feedback = ("the previously rendered frame was blank/near-empty; ensure "
-                            "clearly visible, well-framed content and motion")
-            else:
-                pad = report.get("pad_seconds", 0.0)
-                anim = report.get("animation_seconds", 0.0)
-                why = f"it froze for {pad:.1f}s at the end"
-                feedback = (
-                    f"your animation only filled {anim:.1f}s of the required "
-                    f"{audio_duration:.1f}s, so the last {pad:.1f}s was a FROZEN still "
-                    "frame. Add more meaningful visual beats spread across the whole "
-                    "duration (a change every 2-4s) so the scene keeps progressing to "
-                    "the end. Do NOT pad with a long self.wait()."
-                )
+            why, feedback = repair_reason
             update_job_status(
                 job_id, meta={"scene": index, "visual_repair": attempt + 1},
                 message=(f"Scene {index}/{total} — {why}; regenerating with more "
-                         f"visual beats (repair {attempt + 1}/{vcfg.visual_repair_attempts})"),
+                         f"visual quality (repair {attempt + 1}/{vcfg.visual_repair_attempts})"),
             )
             rp_video, rp_code, rp_cls, rp_failure = _generate_and_compile(
                 ws, service, provider, client, index, total, job_id, scene, audio_duration,
                 previous_context, storyboard_entry, global_style, ledger_summary,
                 regen_feedback=feedback,
+                explanation_mode=explanation_mode,
+                curriculum_profile=curriculum_profile,
             )
             if rp_video and os.path.exists(rp_video):
                 shutil.copyfile(rp_video, dest)
                 new_report = _scene_qa(ws, index, str(dest), vcfg, storyboard_entry)
+                _apply_static_code_flags(new_report, rp_code)
                 _apply_timing_flags(ws, index, new_report, audio_duration, vcfg)
                 video_path, code, cls, report = rp_video, rp_code, rp_cls, new_report
-                if not (new_report.get("blank") or new_report.get("static_end_padding")):
+                repair_reason = _visual_repair_reason(
+                    new_report, audio_duration, allow_advisory=allow_advisory
+                )
+                if not repair_reason:
                     break
 
     # --- store to shared scene cache ------------------------------------ #
@@ -1447,6 +1818,7 @@ def _render_scene(
             cache_json.write_text(json.dumps({
                 "cache_version": CACHE_VERSION, "index": index, "class_name": cls,
                 "audio_duration": audio_duration, "provider": provider, "model": provider_model,
+                "render_quality": vcfg.manim_quality,
                 "flags": report.get("flags", []),
             }, indent=2), encoding="utf-8")
         except Exception as exc:
@@ -1481,11 +1853,16 @@ def generate_rendering_workflow(job_id):
         tts_rate = job.get("tts_rate")
         bypass_cache = job.get("bypass_cache", False)
         bypass_scene_cache = job.get("bypass_scene_cache", False)
+        explanation_mode = job.get("explanation_mode", "general")
+        curriculum_profile = job.get("curriculum_profile", "general")
         video_data = job.get("video_data", [])
+
+        target_duration = int(job.get("target_duration", 60) or 60)
 
         # Re-validate the (possibly user-edited) script before rendering.
         try:
             video_data = parse_script(video_data).as_scene_dicts()
+            animations.validate_script_duration(video_data, target_duration)
         except ScriptValidationError as exc:
             update_job_status(job_id, status="failed", error=str(exc),
                               error_category="invalid_output",
@@ -1505,7 +1882,6 @@ def generate_rendering_workflow(job_id):
             return
 
         provider = selection.provider
-        target_duration = int(job.get("target_duration", 60) or 60)
         status_sink = _make_llm_status(job_id)
         service = LLMService(roles, policy=get_retry_policy(), status=status_sink,
                              strict=selection.strict)
@@ -1527,12 +1903,26 @@ def generate_rendering_workflow(job_id):
         # Identical inputs and outputs, just overlapped instead of back-to-back.
         _tts_pool = None
         _tts_future = None
+        _tts_cache_hit_scenes = set()
         if enable_tts:
             update_job_status(job_id, progress=30, current_step="tts",
                               meta={"tts_status": "generating"},
                               message="Generating audio with TTS...")
             _tts_client = openai.OpenAI(api_key=openai_api_key()) if openai_api_key() else None
             _tts_pool = ThreadPoolExecutor(max_workers=1)
+
+            def _tts_progress(progress, message):
+                if "[CACHE]" in message and "Reused cached audio" in message:
+                    match = re.search(r"Scene\s+(\d+)/", message)
+                    if match:
+                        _tts_cache_hit_scenes.add(int(match.group(1)))
+                    _record_cache_result(job_id, "tts", True)
+                elif "[TTS]" in message and "Audio synthesized" in message:
+                    _record_cache_result(job_id, "tts", False)
+                update_job_status(
+                    job_id, progress=progress, current_step="tts", message=message
+                )
+
             _tts_future = _tts_pool.submit(
                 generate_complete_audio,
                 client=_tts_client, video_data=video_data,
@@ -1542,8 +1932,7 @@ def generate_rendering_workflow(job_id):
                 tts_model=os.getenv("TTS_MODEL", "tts-1"),
                 voice=os.getenv("VOICE", "alloy"),
                 tts_voice=tts_voice, tts_rate=tts_rate, bypass_cache=bypass_cache,
-                status_callback=lambda progress, message: update_job_status(
-                    job_id, progress=progress, current_step="tts", message=message),
+                status_callback=_tts_progress,
             )
 
         sb = None
@@ -1557,6 +1946,8 @@ def generate_rendering_workflow(job_id):
                     service=service, topic=topic, scenes=video_data, provider=provider,
                     target_duration=target_duration, global_style=global_style,
                     client=client, status=status_sink,
+                    explanation_mode=explanation_mode,
+                    curriculum_profile=curriculum_profile,
                 )
                 storyboard_mod.save_storyboard(sb, ws.storyboard_file())
                 if getattr(sb, "global_style", None):
@@ -1627,18 +2018,47 @@ def generate_rendering_workflow(job_id):
                               meta={"tts_status": "ok" if has_audio else "failed"},
                               message="Audio generated" if has_audio else "TTS skipped (failed)")
             if has_audio and audio_durations:
+                actual_narration_seconds = sum(audio_durations.values())
+                try:
+                    animations.validate_duration_seconds(
+                        actual_narration_seconds,
+                        target_duration,
+                        source="Synthesized narration",
+                    )
+                except ScriptValidationError as exc:
+                    update_job_status(
+                        job_id,
+                        status="failed",
+                        error=str(exc),
+                        error_category="invalid_output",
+                        meta={
+                            "tts_status": "duration_mismatch",
+                            "actual_narration_seconds": round(actual_narration_seconds, 1),
+                            "target_duration": target_duration,
+                        },
+                        message=(
+                            f"[ERR] [TTS] Narration is {actual_narration_seconds:.1f}s "
+                            f"for a {target_duration}s request; stopped before rendering."
+                        ),
+                    )
+                    return
                 # Real character count for cost reporting: only the scenes TTS
                 # actually synthesized (audio_durations' keys), not the full
                 # scene list — a scene that failed TTS was never billed.
                 synthesized_chars = sum(
                     len(scene.get("text", "")) for i, scene in enumerate(video_data, 1)
-                    if i in audio_durations
+                    if i in audio_durations and i not in _tts_cache_hit_scenes
                 )
                 _write_job_log(job_id, "tts_usage", {
                     "provider": tts_provider or "edge-tts",
                     "characters": synthesized_chars,
-                    "scenes": len(audio_durations),
+                    "scenes": len(audio_durations) - len(_tts_cache_hit_scenes),
+                    "cache_hits": len(_tts_cache_hit_scenes),
                 })
+                update_job_status(
+                    job_id,
+                    meta={"tts_cache_hit_scenes": sorted(_tts_cache_hit_scenes)},
+                )
         else:
             update_job_status(job_id, progress=40, current_step="code",
                               meta={"tts_status": "disabled"}, message="Skipping TTS (disabled)")
@@ -1723,6 +2143,8 @@ def generate_rendering_workflow(job_id):
                 plan["previous_context"], audio_durations.get(idx),
                 bypass_scene_cache, job_id, roles.animation,
                 plan["sb_entry"], global_style, plan["ledger_summary"], vcfg,
+                explanation_mode=explanation_mode,
+                curriculum_profile=curriculum_profile,
             )
             if plan["repeat_flags"]:
                 report.setdefault("flags", []).extend(plan["repeat_flags"])
@@ -1773,22 +2195,34 @@ def generate_rendering_workflow(job_id):
                 generated_videos.append(scene_video)
 
         if scene_failures:
-            update_job_status(job_id, meta={"scene_failures": scene_failures})
+            failure_msgs = [
+                f"Scene {f['scene']} ({f['stage']}): "
+                f"[{f['error_category']}] {f['error_message']}"
+                for f in scene_failures
+            ]
+            summary = (
+                f"Rendering paused: {len(scene_failures)}/{total} scene(s) failed. "
+                + "; ".join(failure_msgs)
+            )
+            update_job_status(
+                job_id,
+                status="failed",
+                error=summary,
+                error_category=scene_failures[0]["error_category"],
+                meta={
+                    "scene_failures": scene_failures,
+                    "recovery_available": True,
+                    "successful_scene_count": len(generated_videos),
+                },
+                message=summary,
+            )
+            return
 
         if not generated_videos:
-            if scene_failures:
-                failure_msgs = [
-                    f"Scene {f['scene']} ({f['stage']}): [{f['error_category']}] {f['error_message']}"
-                    for f in scene_failures
-                ]
-                summary = f"Rendering failed (0/{total} scenes compiled). " + "; ".join(failure_msgs)
-                primary_cat = scene_failures[0]["error_category"]
-            else:
-                summary = "Rendering failed: no scenes were produced."
-                primary_cat = "render_failed"
+            summary = "Rendering failed: no scenes were produced."
 
             update_job_status(job_id, status="failed", error=summary,
-                              error_category=primary_cat,
+                              error_category="render_failed",
                               meta={"scene_failures": scene_failures},
                               message=summary)
             return
@@ -1876,11 +2310,20 @@ def generate_rendering_workflow(job_id):
 # --------------------------------------------------------------------------- #
 
 
+def normalize_topic_text(topic) -> str:
+    """Normalize user input once before it reaches prompts, caches, or metadata."""
+    return repair_mojibake(str(topic or "").strip())
+
+
 def start_video_generation(
     topic, enable_tts=True, llm_provider="auto", tts_provider=None, tts_voice=None,
     tts_rate=None, bypass_cache=False, bypass_scene_cache=False, target_duration=60,
+    explanation_mode="general", curriculum_profile="general",
 ):
     """Start script generation in a background thread; returns the job id."""
+    topic = normalize_topic_text(topic)
+    explanation_mode = normalize_explanation_mode(explanation_mode)
+    curriculum_profile = normalize_curriculum_profile(curriculum_profile)
     job_id = str(uuid.uuid4())
     jobs[job_id] = {
         "job_id": job_id,
@@ -1896,18 +2339,30 @@ def start_video_generation(
         "tts_rate": tts_rate,
         "bypass_cache": bypass_cache,
         "bypass_scene_cache": bypass_scene_cache,
+        "explanation_mode": explanation_mode,
+        "curriculum_profile": curriculum_profile,
         "target_duration": validate_target_duration(target_duration),
-        "metadata": {},
+        "metadata": {
+            "explanation_mode": explanation_mode,
+            "curriculum_profile": curriculum_profile,
+        },
+        "_stage_started_at": time.time(),
         "created_at": datetime.now().isoformat(),
         "updated_at": datetime.now().isoformat(),
     }
+    _persist_job_manifest(job_id)
     threading.Thread(
         target=generate_script_workflow,
         args=(job_id, topic, enable_tts, llm_provider, tts_provider, tts_voice,
-              tts_rate, bypass_cache, bypass_scene_cache, jobs[job_id]["target_duration"]),
+              tts_rate, bypass_cache, bypass_scene_cache, jobs[job_id]["target_duration"],
+              explanation_mode, curriculum_profile),
         daemon=True,
     ).start()
     return job_id
+
+
+def _start_render_thread(job_id: str) -> None:
+    threading.Thread(target=generate_rendering_workflow, args=(job_id,), daemon=True).start()
 
 
 def continue_video_generation(job_id, video_data):
@@ -1925,10 +2380,49 @@ def continue_video_generation(job_id, video_data):
     job["message"] = "Rendering pipeline started with custom script"
     job["updated_at"] = datetime.now().isoformat()
 
-    threading.Thread(target=generate_rendering_workflow, args=(job_id,), daemon=True).start()
+    _persist_job_manifest(job_id)
+    _start_render_thread(job_id)
+    return True
+
+
+def retry_failed_generation(job_id: str) -> bool:
+    """Retry a failed render while forcing reuse of every successful cache entry."""
+    job = jobs.get(job_id) or _restore_job_from_manifest(job_id)
+    if not job or job.get("status") != "failed" or not job.get("video_data"):
+        return False
+
+    job["status"] = "queued"
+    job["progress"] = 25
+    job["current_step"] = "tts"
+    job["error"] = None
+    job["error_category"] = None
+    job["bypass_cache"] = False
+    job["bypass_scene_cache"] = False
+    job["retry_count"] = int(job.get("retry_count", 0)) + 1
+    job["_stage_started_at"] = time.time()
+    job["updated_at"] = datetime.now().isoformat()
+    metadata = job.setdefault("metadata", {})
+    previous_failure = {
+        key: metadata.get(key)
+        for key in ("failure", "scene_failures")
+        if metadata.get(key)
+    }
+    if previous_failure:
+        metadata.setdefault("recovery_history", []).append(previous_failure)
+    metadata.pop("failure", None)
+    metadata.pop("scene_failures", None)
+    metadata["recovery"] = "running"
+    update_job_status(
+        job_id,
+        message=(
+            f"[INFO] [SYSTEM] Recovery attempt {job['retry_count']} started; "
+            "successful TTS and scene artifacts will be reused."
+        ),
+    )
+    _start_render_thread(job_id)
     return True
 
 
 def get_job_status(job_id):
     """Return the current job state dict (or None)."""
-    return jobs.get(job_id)
+    return jobs.get(job_id) or _restore_job_from_manifest(job_id)

@@ -6,7 +6,9 @@ from ffmpeg_utils import (
     build_concat_audio_cmd,
     build_concat_list_text,
     build_concat_video_cmd,
+    build_concat_video_transcode_cmd,
     build_mux_cmd,
+    build_mux_transcode_audio_cmd,
     parse_probe,
     validate_output,
 )
@@ -29,11 +31,19 @@ def test_concat_audio_cmd_reencodes_aac():
     assert cmd[-1] == "out.m4a"
 
 
-def test_concat_video_cmd_uniform_h264():
+def test_concat_video_cmd_preserves_rendered_stream():
     cmd = build_concat_video_cmd("list.txt", "out.mp4")
+    assert "copy" in cmd
+    assert "libx264" not in cmd
+    assert "-an" in cmd  # silent concat
+    assert "+faststart" in cmd
+
+
+def test_concat_video_fallback_cmd_normalizes_h264():
+    cmd = build_concat_video_transcode_cmd("list.txt", "out.mp4")
     assert "libx264" in cmd
     assert "yuv420p" in cmd
-    assert "-an" in cmd  # silent concat
+    assert "-an" in cmd
 
 
 def test_mux_cmd_has_faststart_and_maps():
@@ -41,7 +51,15 @@ def test_mux_cmd_has_faststart_and_maps():
     assert "+faststart" in cmd
     assert "0:v:0" in cmd
     assert "1:a:0" in cmd
-    assert "aac" in cmd
+    assert cmd[cmd.index("-c:v") + 1] == "copy"
+    assert cmd[cmd.index("-c:a") + 1] == "copy"
+
+
+def test_mux_fallback_cmd_reencodes_only_audio():
+    cmd = build_mux_transcode_audio_cmd("v.mp4", "a.m4a", "final.mp4")
+    assert cmd[cmd.index("-c:v") + 1] == "copy"
+    assert cmd[cmd.index("-c:a") + 1] == "aac"
+    assert "192k" in cmd
 
 
 def test_parse_probe_reads_streams():

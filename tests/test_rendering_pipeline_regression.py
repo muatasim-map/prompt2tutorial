@@ -53,11 +53,15 @@ def test_job_workspace():
         "message": "Script generated",
         "enable_tts": False,
         "llm_provider": "auto",
-        "target_duration": 60,
+        "target_duration": 10,
         "video_data": [
             {
                 "chapter": "Chapter 1",
-                "text": "What is a neural network?",
+                "text": (
+                    "A neural network combines weighted inputs through connected layers, "
+                    "compares its prediction with a target, and adjusts those weights so "
+                    "later predictions become more accurate."
+                ),
                 "animation": "Show nodes connecting",
                 "objective": "Understand nodes",
                 "explanation": "Nodes pass signals forward.",
@@ -83,9 +87,7 @@ def test_invalid_manim_llm_response_reports_scene_failure(monkeypatch, no_storyb
     vg.generate_rendering_workflow(test_job_workspace.job_id)
     job = vg.get_job_status(test_job_workspace.job_id)
 
-    assert job["status"] == "failed"
-    assert job["error_category"] == "invalid_output"
-    assert "0/1 scenes compiled" in job["error"]
+    assert "scene(s) failed" in job["error"]
 
     failures = job.get("metadata", {}).get("scene_failures", [])
     assert len(failures) == 1

@@ -129,3 +129,117 @@ def test_manim_code_blank_rejected():
 def test_manim_code_invalid_class_name_rejected():
     with pytest.raises(ScriptValidationError):
         parse_manim_code({"content": "class A(Scene): pass", "class_name": "1bad name"})
+
+
+def test_manim_code_rejects_invalid_python_syntax():
+    with pytest.raises(ScriptValidationError, match="valid Python"):
+        parse_manim_code({
+            "content": "from manim import *\nclass Demo(Scene)\n    pass",
+            "class_name": "Demo",
+        })
+
+
+def test_manim_code_requires_declared_scene_class():
+    with pytest.raises(ScriptValidationError, match="must define class Demo"):
+        parse_manim_code({
+            "content": "from manim import *\nclass Other(Scene):\n    pass",
+            "class_name": "Demo",
+        })
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["CYAN", "AMBER", "MAGENTA", "LIME", "ORANGE_D", "TRANSPARENT", "Right"],
+)
+def test_manim_code_rejects_known_invalid_color_names(name):
+    with pytest.raises(ScriptValidationError, match="unsupported Manim name"):
+        parse_manim_code({
+            "content": (
+                "from manim import *\n"
+                "class Demo(Scene):\n"
+                f"    def construct(self): self.add(Circle(color={name}))"
+            ),
+            "class_name": "Demo",
+        })
+
+
+def test_manim_code_rejects_unqualified_css_easing_name():
+    with pytest.raises(ScriptValidationError, match="rate_functions.ease_out_cubic"):
+        parse_manim_code({
+            "content": (
+                "from manim import *\n"
+                "class Demo(Scene):\n"
+                "    def construct(self):\n"
+                "        self.play(Create(Circle()), rate_func=ease_out_cubic)"
+            ),
+            "class_name": "Demo",
+        })
+
+
+def test_manim_code_rejects_add_on_a_statically_known_list():
+    with pytest.raises(ScriptValidationError, match=r"list.*\.add"):
+        parse_manim_code({
+            "content": (
+                "from manim import *\n"
+                "class Demo(Scene):\n"
+                "    def construct(self):\n"
+                "        labels = []\n"
+                "        labels.add(Text('x'))\n"
+            ),
+            "class_name": "Demo",
+        })
+
+
+def test_manim_code_requires_visual_primitives_import_for_helpers():
+    with pytest.raises(ScriptValidationError, match="visual_primitives"):
+        parse_manim_code({
+            "content": (
+                "from manim import *\n"
+                "class Demo(Scene):\n"
+                "    def construct(self): self.add(make_box('Input'))"
+            ),
+            "class_name": "Demo",
+        })
+
+
+@pytest.mark.parametrize("invalid_name", ["Animate", "GrowFromBottom"])
+def test_manim_code_rejects_known_nonexistent_animation_names(invalid_name):
+    with pytest.raises(ScriptValidationError, match=invalid_name):
+        parse_manim_code({
+            "content": (
+                "from manim import *\n"
+                "class Demo(Scene):\n"
+                "    def construct(self):\n"
+                f"        self.play({invalid_name}(Circle()))\n"
+            ),
+            "class_name": "Demo",
+        })
+
+
+def test_manim_code_rejects_known_invalid_keyword_and_method():
+    with pytest.raises(ScriptValidationError, match="DIRECTION|stretch_in_place"):
+        parse_manim_code({
+            "content": (
+                "from manim import *\n"
+                "class Demo(Scene):\n"
+                "    def construct(self):\n"
+                "        dot = Dot(DIRECTION=RIGHT)\n"
+                "        dot.stretch_in_place(2, 0)\n"
+            ),
+            "class_name": "Demo",
+        })
+
+
+def test_manim_code_accepts_qualified_easing_and_imported_helper():
+    code = parse_manim_code({
+        "content": (
+            "from manim import *\n"
+            "from visual_primitives import make_box\n"
+            "class Demo(Scene):\n"
+            "    def construct(self):\n"
+            "        box = make_box('Input')\n"
+            "        self.play(FadeIn(box), rate_func=rate_functions.ease_out_cubic)"
+        ),
+        "class_name": "Demo",
+    })
+    assert code.class_name == "Demo"

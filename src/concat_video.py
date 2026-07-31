@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -45,7 +46,10 @@ _COMPILE_TIMEOUTS = {"low": 120, "medium": 240, "high": 300}
 # observed causing repeated false-timeout failures on 3D scenes (3 consecutive
 # 120s timeouts before any repair could even help) — this multiplier gives 3D
 # scenes a realistic budget instead of one tuned for 2D.
-_THREED_TIMEOUT_MULTIPLIER = 2.5
+# Successful simplified 3D attempts in the supplied job completed around
+# 180-185s. A 1.75x allowance leaves headroom at low quality (210s) without
+# letting a doomed first attempt consume the old five-minute limit.
+_THREED_TIMEOUT_MULTIPLIER = 1.75
 
 
 def resolve_compile_timeout(is_3d: bool = False) -> int:
@@ -100,6 +104,87 @@ def _resolve_manim_executable() -> str:
     return "manim"
 
 
+def _build_manim_command(
+    file_path: str | os.PathLike,
+    class_name: str,
+    media_dir: str | os.PathLike,
+    *,
+    quality_flag: str,
+) -> list[str]:
+    """Build a quiet, deterministic one-scene Manim command."""
+    return [
+        _resolve_manim_executable(),
+        quality_flag,
+        "--progress_bar", "none",
+        "-v", "WARNING",
+        "--disable_caching",
+        "--media_dir", str(media_dir),
+        str(file_path),
+        class_name,
+    ]
+
+
+def _terminate_process_tree(process: subprocess.Popen) -> None:
+    """Terminate ``process`` and every descendant without waiting on pipes."""
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            process.kill()
+        return
+    try:
+        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+    except (OSError, ProcessLookupError):
+        process.kill()
+
+
+def _run_process_tree(
+    cmd: Sequence[str],
+    *,
+    timeout: float,
+    env: Optional[dict] = None,
+) -> subprocess.CompletedProcess:
+    """Run a command with a hard timeout that kills descendant processes too."""
+    popen_kwargs = {
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+        "env": env,
+    }
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        popen_kwargs["start_new_session"] = True
+
+    process = subprocess.Popen(list(cmd), **popen_kwargs)
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _terminate_process_tree(process)
+        try:
+            process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()
+        raise
+    return subprocess.CompletedProcess(
+        args=list(cmd),
+        returncode=process.returncode,
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+
 def compile_video(
     file_path: str | os.PathLike,
     class_name: str,
@@ -132,18 +217,18 @@ def compile_video(
     if timeout is None:
         timeout = resolve_compile_timeout(is_3d=is_3d)
 
-    cmd = [
-        _resolve_manim_executable(),
-        quality_flag,
-        "--media_dir", str(media_dir),
-        str(file_path),
+    cmd = _build_manim_command(
+        file_path,
         class_name,
-    ]
+        media_dir,
+        quality_flag=quality_flag,
+    )
     print(f"\nCompiling: {' '.join(cmd)}")
 
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
+        result = _run_process_tree(
+            cmd,
+            timeout=timeout,
             env=_manim_env(file_path.parent),
         )
     except subprocess.TimeoutExpired:

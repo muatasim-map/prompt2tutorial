@@ -10,9 +10,11 @@ fatal) so a job never fails purely for a heuristic layout repeat.
 from __future__ import annotations
 
 import json
+import re
 from typing import List, Optional
 
 from llm_service import LLMService, StatusCallback
+from learning_profiles import build_storyboard_guidance
 from schemas import (
     Storyboard,
     ScriptValidationError,
@@ -21,7 +23,7 @@ from schemas import (
 )
 from collections import Counter
 
-from domain_guidance import tag_menu_for_prompt
+from domain_guidance import a_level_math_menu_for_prompt, tag_menu_for_prompt
 from visual_ledger import normalize
 
 _SYSTEM = (
@@ -185,6 +187,43 @@ def dimension_notes(storyboard: Storyboard) -> List[str]:
     ]
 
 
+_TRUE_3D_CONCEPT_RE = re.compile(
+    r"\b(?:3[- ]?d|three[- ]dimensional|3[- ]space|spatial|volume|solid|"
+    r"sphere|cube|polyhedron|plane|cross product|"
+    r"orbital|orbit|vector field)\b",
+    re.IGNORECASE,
+)
+_TRUE_3D_MATH_VISUAL_RE = re.compile(
+    r"\b(?:loss (?:surface|landscape)|topograph(?:y|ical)|function surface)\b",
+    re.IGNORECASE,
+)
+
+
+def apply_render_cost_policy(storyboard: Storyboard) -> List[int]:
+    """Downgrade decorative true 3D while preserving spatial lesson content."""
+    downgraded: List[int] = []
+    for scene in storyboard.scenes:
+        if scene.dimension != "3d":
+            continue
+        # The teaching goal decides dimensionality. A decorative metaphor such
+        # as an "endless 3D wall of dials" is not evidence that mesh rendering
+        # helps the learner.
+        teaching = f"{scene.learning_goal} {scene.key_concept}"
+        math_visual = f"{teaching} {scene.visual_metaphor} {scene.composition}"
+        if (
+            _TRUE_3D_CONCEPT_RE.search(teaching)
+            or _TRUE_3D_MATH_VISUAL_RE.search(math_visual)
+        ):
+            continue
+        scene.dimension = "2.5d"
+        scene.camera_plan = (
+            "Fixed frame; use layered foreground/background focus and object "
+            "motion instead of a true 3D camera."
+        )
+        downgraded.append(scene.index)
+    return downgraded
+
+
 def _diversity_rules_block(target_duration: int, scene_count: int) -> str:
     required = required_distinct_approaches(target_duration, scene_count)
     return f"""SCENE DIVERSITY RULES (apply when you choose CONTINUITY MODE = varied,
@@ -262,8 +301,20 @@ SEMANTIC COLOR CONTRACT (a VIDEO-WIDE choice — the SAME list on every scene):
   appears — this is what makes a series feel authored rather than improvised."""
 
 
-def _build_prompt(topic: str, scenes: List[dict], target_duration: int, global_style: str) -> str:
+def _build_prompt(
+    topic: str,
+    scenes: List[dict],
+    target_duration: int,
+    global_style: str,
+    explanation_mode: str = "general",
+    curriculum_profile: str = "general",
+) -> str:
     tag_menu = tag_menu_for_prompt()
+    a_level_math_menu = a_level_math_menu_for_prompt()
+    profile_guidance = build_storyboard_guidance(
+        explanation_mode,
+        curriculum_profile,
+    )
     scene_lines = []
     for i, s in enumerate(scenes, 1):
         scene_lines.append(
@@ -275,6 +326,8 @@ def _build_prompt(topic: str, scenes: List[dict], target_duration: int, global_s
 
     return f"""Design a complete VISUAL STORYBOARD for this {target_duration}s educational
 video about: {topic}
+
+{profile_guidance}
 
 GLOBAL VISUAL STYLE CONTRACT (all scenes must share this language, but must NOT look identical):
 {global_style}
@@ -293,7 +346,11 @@ For EACH scene produce a storyboard entry with these fields:
 - primary_objects   (list of the main on-screen objects)
 - primary_motion    (the main transformation/animation the viewer sees)
 - color_role        (how color carries meaning, within the palette)
-- camera_plan       (optional; framing notes if relevant, else null)
+- camera_plan       (optional; use null by default. When a dense graph, local
+                     geometric detail, or long derivation genuinely benefits,
+                     specify ONE slow purposeful "zoom" or "pan" and what
+                     mathematical relationship it reveals. Never decorative
+                     camera motion; true 3D uses one fixed orientation)
 - transition_from_prev (how this scene grows out of the previous scene)
 - on_screen_text    (optional; only short labels that must appear, else null)
 - anti_repetition_notes (explicitly how this scene differs from earlier scenes)
@@ -301,6 +358,8 @@ For EACH scene produce a storyboard entry with these fields:
 - dimension        (2d | 2.5d | 3d — see DIMENSIONALITY below; default 2d)
 - primary_domain_tag    (EXACTLY ONE tag — see DOMAIN TAGS below)
 - secondary_domain_tags (list of 0-2 further tags, or [] — see DOMAIN TAGS below)
+- a_level_math_topic    (one exact topic from A-LEVEL MATHEMATICS TOPICS below
+                         for an A-level maths scene, otherwise null)
 - narrative_role   (hook | setup | development | misconception | resolution |
                     recap | standalone — see NARRATIVE ARC below; default standalone)
 - scene_kind       (explanation | worked_problem — see SCENE KIND below;
@@ -310,6 +369,11 @@ For EACH scene produce a storyboard entry with these fields:
 - semantic_colors  (list of 0-6 {{"concept": "...", "color": "..."}} objects, SAME
                     list for every scene — see SEMANTIC COLOR CONTRACT below)
 - opening_state    (what is already on screen as the scene begins)
+- Each visual beat must also include:
+  narration_cue    (a short exact phrase from this scene's narration)
+  focus_object     (the ONE object leading the viewer's attention)
+  emphasis         (primary | secondary | context | none)
+  Synchronize the visible action to the narration_cue.
 - visual_beats     (ORDERED list of the meaningful changes that make the scene progress;
                     each beat is {{"at_seconds": <number>, "action": "<what visibly
                     changes>", "objects": ["..."]}} — plan a beat roughly every 2-4
@@ -345,6 +409,14 @@ Rules for tagging:
   framing question, or any scene that needs no specialist visual convention.
 - Do NOT add a tag merely because a related word appears in the narration.
 - Only use tags from the list above; any other value is invalid.
+
+A-LEVEL MATHEMATICS TOPICS:
+{a_level_math_menu}
+
+Use a_level_math_topic only when the scene teaches one of these syllabus areas.
+Choose the exact skill governing this scene, not the broad video title. This
+supplements domain routing; for example differentiation still uses
+primary_domain_tag="calculus". Use null for non-mathematics scenes.
 
 Worked examples:
 - "A matrix rotates and stretches a vector" -> primary linear_algebra, secondary [geometry]
@@ -423,6 +495,8 @@ def generate_storyboard(
     global_style: str,
     client=None,
     status: StatusCallback = None,
+    explanation_mode: str = "general",
+    curriculum_profile: str = "general",
 ) -> Storyboard:
     """Generate, validate, and diversity-check the storyboard (one repair max).
 
@@ -430,7 +504,14 @@ def generate_storyboard(
         ScriptValidationError: if the storyboard cannot be validated even after a
             repair attempt.
     """
-    prompt = _build_prompt(topic, scenes, target_duration, global_style)
+    prompt = _build_prompt(
+        topic,
+        scenes,
+        target_duration,
+        global_style,
+        explanation_mode=explanation_mode,
+        curriculum_profile=curriculum_profile,
+    )
     result = service.generate(
         role="storyboard", system=_SYSTEM, prompt=prompt, provider=provider,
         client=client, response_schema=gemini_storyboard_schema(),
@@ -465,6 +546,13 @@ def generate_storyboard(
             print(f"[STORYBOARD] Repair invalid, keeping original: {exc}")
 
     storyboard._residual_violations = violations  # type: ignore[attr-defined]
+    dimension_downgrades = apply_render_cost_policy(storyboard)
+    storyboard._dimension_downgrades = dimension_downgrades  # type: ignore[attr-defined]
+    if dimension_downgrades:
+        print(
+            "[STORYBOARD] Render-cost policy changed decorative 3d to 2.5d for "
+            + ", ".join(f"scene {i}" for i in dimension_downgrades)
+        )
     # Report-only: recorded for visibility, never a repair trigger or a failure.
     dim_notes = dimension_notes(storyboard)
     storyboard._dimension_notes = dim_notes  # type: ignore[attr-defined]
@@ -504,11 +592,17 @@ def save_storyboard(storyboard: Storyboard, path) -> None:
     data = storyboard.as_dict()
     data["residual_diversity_notes"] = getattr(storyboard, "_residual_violations", [])
     data["dimension_notes"] = getattr(storyboard, "_dimension_notes", [])
+    data["dimension_downgrades"] = getattr(storyboard, "_dimension_downgrades", [])
     data["dimension_summary"] = {
         s.index: (s.dimension or "2d") for s in storyboard.scenes
     }
     data["domain_routing_summary"] = {
         s.index: s.domain_tags() for s in storyboard.scenes
+    }
+    data["a_level_math_topic_summary"] = {
+        s.index: s.a_level_math_topic
+        for s in storyboard.scenes
+        if s.a_level_math_topic
     }
     data["continuity_mode"] = getattr(storyboard, "_continuity_mode", canonical_continuity_mode(storyboard))
     data["semantic_colors"] = getattr(storyboard, "_semantic_colors", canonical_semantic_colors(storyboard))

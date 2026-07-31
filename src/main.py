@@ -8,6 +8,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from video_generator import start_video_generation, get_job_status
+from runtime_checks import check_runtime_readiness
+from learning_profiles import (
+    normalize_curriculum_profile,
+    normalize_explanation_mode,
+)
 
 # Get absolute path to frontend directory
 FRONTEND_DIR = Path(__file__).parent / 'frontend'
@@ -23,6 +28,17 @@ MEDIA_DIR = PROJECT_ROOT / 'media'
 os.makedirs(MEDIA_DIR, exist_ok=True)
 
 
+def _error_response(message, status_code, category, **details):
+    payload = {
+        'error': message,
+        'error_category': category,
+        'retryable': status_code >= 500,
+    }
+    if details:
+        payload['details'] = details
+    return jsonify(payload), status_code
+
+
 @app.route('/')
 def index():
     """Serve the main HTML page"""
@@ -33,11 +49,24 @@ def index():
 def generate_video():
     """Start video generation"""
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         
         topic = data.get('topic')
-        if not topic:
-            return jsonify({'error': 'Topic is required'}), 400
+        if not isinstance(topic, str) or not topic.strip():
+            return _error_response('Topic is required', 400, 'invalid_request',
+                                   field='topic')
+        if len(topic.strip()) > 250:
+            return _error_response('Topic must be 250 characters or fewer', 400,
+                                   'invalid_request', field='topic', max_length=250)
+
+        readiness = check_runtime_readiness()
+        if not readiness['ready']:
+            return _error_response(
+                'Generation dependencies are not ready. Check /api/health for details.',
+                503,
+                'environment_not_ready',
+                failed_checks=readiness['failed_checks'],
+            )
 
         # Refuse to start a job on stale code. Auto-reload is disabled, so a
         # server started before an edit keeps running the OLD modules and fails
@@ -45,15 +74,16 @@ def generate_video():
         from app_build import build_info
         info = build_info()
         if info['stale']:
-            return jsonify({
-                'error': (
+            return _error_response(
+                (
                     'Server is running OUTDATED code (source changed since startup). '
-                    'Stop this server and run "python src/main.py" again, then retry. '
+                    'Stop this server and run "python run.py" again, then retry. '
                     f"running_build={info['build_id']}"
                 ),
-                'error_category': 'stale_server',
-                'build': info,
-            }), 503
+                503,
+                'stale_server',
+                build=info,
+            )
 
         llm_provider = data.get('llm_provider', 'auto')
         enable_tts = data.get('enable_tts', True)
@@ -63,31 +93,58 @@ def generate_video():
         bypass_cache = data.get('bypass_cache', False)
         bypass_scene_cache = data.get('bypass_scene_cache', False)
         target_duration = data.get('target_duration', 60)
+
+        try:
+            explanation_mode = normalize_explanation_mode(
+                data.get('explanation_mode', 'general')
+            )
+            curriculum_profile = normalize_curriculum_profile(
+                data.get('curriculum_profile', 'general')
+            )
+        except ValueError as exc:
+            return _error_response(str(exc), 400, 'invalid_request',
+                                   field='explanation_mode_or_curriculum_profile')
         
         # Start video generation
-        job_id = start_video_generation(topic, enable_tts, llm_provider, tts_provider, tts_voice, tts_rate, bypass_cache, bypass_scene_cache, target_duration)
+        job_id = start_video_generation(
+            topic,
+            enable_tts,
+            llm_provider,
+            tts_provider,
+            tts_voice,
+            tts_rate,
+            bypass_cache,
+            bypass_scene_cache,
+            target_duration,
+            explanation_mode,
+            curriculum_profile,
+        )
         
         return jsonify({
             'job_id': job_id,
             'status': 'queued',
-            'message': 'Video generation started'
+            'message': 'Video generation started',
+            'explanation_mode': explanation_mode,
+            'curriculum_profile': curriculum_profile,
         }), 202
         
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return _error_response(str(e), 500, 'internal_error')
 
 @app.route('/api/generate/continue', methods=['POST'])
 def continue_video():
     """Continue video generation with revised script"""
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         job_id = data.get('job_id')
         video_data = data.get('video_data')
         
         if not job_id:
-            return jsonify({'error': 'Job ID is required'}), 400
+            return _error_response('Job ID is required', 400, 'invalid_request',
+                                   field='job_id')
         if not video_data:
-            return jsonify({'error': 'Video data is required'}), 400
+            return _error_response('Video data is required', 400, 'invalid_request',
+                                   field='video_data')
             
         from video_generator import continue_video_generation as resume_gen
         
@@ -99,17 +156,45 @@ def continue_video():
                 'message': 'Video generation resumed'
             }), 200
         else:
-            return jsonify({'error': 'Job not found or invalid status'}), 404
+            return _error_response('Job not found or invalid status', 409,
+                                   'invalid_job_state', job_id=job_id)
             
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return _error_response(str(e), 500, 'internal_error')
+
+
+@app.route('/api/generate/retry', methods=['POST'])
+def retry_video():
+    """Retry a failed job, reusing every successful cached artifact."""
+    data = request.get_json(silent=True) or {}
+    job_id = data.get('job_id')
+    if not job_id:
+        return _error_response('Job ID is required', 400, 'invalid_request',
+                               field='job_id')
+
+    from video_generator import retry_failed_generation
+
+    if not retry_failed_generation(job_id):
+        return _error_response(
+            'Job not found, has no reviewed script, or is not in failed state.',
+            409,
+            'invalid_job_state',
+            job_id=job_id,
+        )
+    return jsonify({
+        'job_id': job_id,
+        'status': 'queued',
+        'message': 'Recovery started; successful cached artifacts will be reused.',
+    }), 202
+
+
 @app.route('/api/progress/<job_id>', methods=['GET'])
 def get_progress(job_id):
     """Get video generation progress"""
     job = get_job_status(job_id)
 
     if not job:
-        return jsonify({'error': 'Job not found'}), 404
+        return _error_response('Job not found', 404, 'not_found', job_id=job_id)
 
     # The activity feed is append-only server-side; a client passes the highest
     # seq it has already rendered so each poll returns only what is new. Without
@@ -141,14 +226,17 @@ def health_check():
     the server must be restarted to pick it up (auto-reload is intentionally off).
     """
     from app_build import build_info
+    readiness = check_runtime_readiness()
     return jsonify({
-        'status': 'healthy',
+        'status': 'healthy' if readiness['ready'] else 'degraded',
         'service': 'Prompt2Learn.ai API',
         'build': build_info(),
+        'readiness': readiness,
     })
 
 
-if __name__ == '__main__':
+def main():
+    """Start the local Flask development server."""
     port = int(os.getenv("PORT", 5000))
     print("=" * 80)
     print("Prompt2Learn.ai Server")
@@ -158,6 +246,11 @@ if __name__ == '__main__':
     print("=" * 80)
     from app_build import BUILD_ID
     print(f"Build: {BUILD_ID}   (also shown at /api/health)")
+    readiness = check_runtime_readiness()
+    if readiness["ready"]:
+        print("Readiness: all required generation dependencies are available")
+    else:
+        print(f"Readiness: missing {', '.join(readiness['failed_checks'])}")
     print("\nNOTE: Auto-reload is disabled to prevent job state loss during video generation")
     print("      Restart the server manually if you make code changes.")
     print("      If /api/health reports \"stale\": true, this process is running OLD code.\n")
@@ -169,3 +262,7 @@ if __name__ == '__main__':
         use_reloader=False,  # Disable auto-reload to prevent losing job state
         threaded=True
     )
+
+
+if __name__ == '__main__':
+    main()

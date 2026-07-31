@@ -105,3 +105,56 @@ def test_repair_capped_at_configured_attempts(monkeypatch, ws):
 
     assert dest is not None
     assert counters["gen"] == 2      # original + 1 repair only (capped)
+
+
+@pytest.mark.parametrize("flag", [
+    "long_static_run",
+    "no_meaningful_change",
+    "text_below_minimum_size",
+    "too_many_text_mobjects",
+    "content_near_edge_possible_clipping",
+])
+def test_advisory_visual_flag_does_not_trigger_repair_by_default(monkeypatch, ws, flag):
+    counters = _install_fakes(monkeypatch, qa_blank_sequence=[False])
+
+    reports = iter([{"index": 1, "flags": [flag], "blank": False}])
+    monkeypatch.setattr(vg, "_scene_qa", lambda *args, **kwargs: next(reports))
+    vcfg = dataclasses.replace(
+        get_visual_config(), visual_repair_attempts=1, visual_qa_enabled=True
+    )
+
+    _, _, report = _render(ws, vcfg)
+
+    assert counters["gen"] == 1
+    assert flag in report["flags"]
+
+
+def test_advisory_visual_repair_can_be_enabled(monkeypatch, ws):
+    counters = _install_fakes(monkeypatch, qa_blank_sequence=[False, False])
+    reports = iter([
+        {"index": 1, "flags": ["long_static_run"], "blank": False},
+        {"index": 1, "flags": [], "blank": False},
+    ])
+    monkeypatch.setattr(vg, "_scene_qa", lambda *args, **kwargs: next(reports))
+    vcfg = dataclasses.replace(
+        get_visual_config(),
+        visual_repair_attempts=1,
+        visual_qa_enabled=True,
+        auto_repair_advisory_qa=True,
+    )
+
+    _, _, report = _render(ws, vcfg)
+
+    assert counters["gen"] == 2
+    assert report["flags"] == []
+
+
+def test_visual_repair_feedback_names_quality_failure():
+    report = {
+        "flags": ["text_below_minimum_size", "too_many_text_mobjects"],
+        "blank": False,
+    }
+    reason = vg._visual_repair_reason(report, 8.0, allow_advisory=True)
+    assert reason is not None
+    assert "font size" in reason[1]
+    assert "text objects" in reason[1]

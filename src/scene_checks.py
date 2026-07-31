@@ -33,6 +33,8 @@ MORPH_VERBS: Set[str] = {
     "Transform",
     "ReplacementTransform",
     "TransformFromCopy",
+    "TransformMatchingShapes",
+    "TransformMatchingTex",
     "MoveAlongPath",
     "always_redraw",
 }
@@ -44,6 +46,14 @@ MIN_FADEOUTS_FOR_FLAG = 2
 
 FLAG_NO_MORPH = "no_morph_delete_and_rebuild"
 FLAG_TEXT_MORPH = "text_to_text_morph"
+FLAG_SMALL_TEXT = "text_below_minimum_size"
+FLAG_LONG_TEXT = "excessive_on_screen_text"
+FLAG_TEXT_DENSITY = "too_many_text_mobjects"
+
+MIN_READABLE_FONT_SIZE = 22
+MAX_TEXT_LITERAL_CHARS = 120
+MAX_TEXT_MOBJECTS = 6
+TEXT_MOBJECTS: Set[str] = {"Text", "Paragraph", "MarkupText", "MathTex", "Tex"}
 
 # Morphs that interpolate one mobject's points into another's. Applied to two
 # Text objects with different strings, Manim pairs glyphs by index and tweens
@@ -82,6 +92,9 @@ class SceneCodeFacts:
     # (verb, left, right) for every point-interpolating morph between two
     # glyph-bearing mobjects — the unreadable-smear pattern.
     text_morphs: List[tuple] = field(default_factory=list)
+    text_mobject_count: int = 0
+    small_text_sizes: List[float] = field(default_factory=list)
+    long_text_literals: List[str] = field(default_factory=list)
 
     @property
     def uses_any_morph(self) -> bool:
@@ -90,6 +103,17 @@ class SceneCodeFacts:
     @property
     def has_text_morph(self) -> bool:
         return bool(self.text_morphs)
+
+    @property
+    def static_quality_flags(self) -> List[str]:
+        flags: List[str] = []
+        if self.small_text_sizes:
+            flags.append(FLAG_SMALL_TEXT)
+        if self.long_text_literals:
+            flags.append(FLAG_LONG_TEXT)
+        if self.text_mobject_count > MAX_TEXT_MOBJECTS:
+            flags.append(FLAG_TEXT_DENSITY)
+        return flags
 
 
 def _callee_name(node: ast.Call) -> Optional[str]:
@@ -127,6 +151,21 @@ def _string_literal(node: ast.AST) -> Optional[str]:
         right = _string_literal(node.right)
         if left is not None and right is not None:
             return left + right
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        left = _string_literal(node.left)
+        right = _string_literal(node.right)
+        if left is not None and isinstance(node.right, ast.Constant):
+            if isinstance(node.right.value, int) and 0 <= node.right.value <= 1000:
+                return left * node.right.value
+        if right is not None and isinstance(node.left, ast.Constant):
+            if isinstance(node.left.value, int) and 0 <= node.left.value <= 1000:
+                return right * node.left.value
+    return None
+
+
+def _numeric_literal(node: ast.AST) -> Optional[float]:
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return float(node.value)
     return None
 
 
@@ -197,6 +236,9 @@ class _SceneVisitor(ast.NodeVisitor):
         # variable that was assigned earlier in the source, so one pass suffices.
         self.glyph_vars: dict = {}
         self.text_morphs: List[tuple] = []
+        self.text_mobject_count = 0
+        self.small_text_sizes: List[float] = []
+        self.long_text_literals: List[str] = []
 
     def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802 (ast API)
         if _is_glyph_expr(node.value):
@@ -239,6 +281,17 @@ class _SceneVisitor(ast.NodeVisitor):
     def visit_Call(self, node: ast.Call) -> None:  # noqa: N802 (ast API)
         name = _callee_name(node)
         if name:
+            if name in TEXT_MOBJECTS:
+                self.text_mobject_count += 1
+                if node.args:
+                    literal = _string_literal(node.args[0])
+                    if literal is not None and len(literal) > MAX_TEXT_LITERAL_CHARS:
+                        self.long_text_literals.append(literal[:80])
+                for keyword in node.keywords:
+                    if keyword.arg == "font_size":
+                        size = _numeric_literal(keyword.value)
+                        if size is not None and size < MIN_READABLE_FONT_SIZE:
+                            self.small_text_sizes.append(size)
             if name in POINT_INTERPOLATING_MORPHS:
                 self._check_text_morph(node, name)
             if name in MORPH_VERBS and name not in self.morph:
@@ -273,6 +326,9 @@ def analyze_scene_code(code: str) -> SceneCodeFacts:
         discarded_names=visitor.discarded,
         play_call_count=visitor.plays,
         text_morphs=visitor.text_morphs,
+        text_mobject_count=visitor.text_mobject_count,
+        small_text_sizes=visitor.small_text_sizes,
+        long_text_literals=visitor.long_text_literals,
     )
 
 

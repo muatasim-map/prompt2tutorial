@@ -116,30 +116,30 @@
                     Autonomous multi-agent pipeline scripts, narrates with neural audio, and animates mathematical Manim code — from prompt to finished video.
                 </p>
 
-                <!-- Investor Metric Telemetry Bar -->
+                <!-- Pipeline capabilities (no unmeasured performance claims) -->
                 <div class="hero-metrics-bar">
                     <div class="metric-item">
                         <span class="metric-icon" aria-hidden="true">⚡</span>
-                        <span class="metric-value">1.2s</span>
-                        <span class="metric-label">Pipeline Latency</span>
+                        <span class="metric-value">Measured</span>
+                        <span class="metric-label">Job Timing</span>
                     </div>
                     <div class="metric-divider"></div>
                     <div class="metric-item">
                         <span class="metric-icon" aria-hidden="true">🎬</span>
-                        <span class="metric-value">60 FPS</span>
-                        <span class="metric-label">1080p Manim Render</span>
+                        <span class="metric-value">Manim CE</span>
+                        <span class="metric-label">Animation Engine</span>
                     </div>
                     <div class="metric-divider"></div>
                     <div class="metric-item">
                         <span class="metric-icon" aria-hidden="true">🧠</span>
-                        <span class="metric-value">99.4%</span>
-                        <span class="metric-label">Code Accuracy</span>
+                        <span class="metric-value">Scene QA</span>
+                        <span class="metric-label">Render Checks</span>
                     </div>
                     <div class="metric-divider"></div>
                     <div class="metric-item">
                         <span class="metric-icon" aria-hidden="true">💰</span>
-                        <span class="metric-value">$0.0018</span>
-                        <span class="metric-label">Avg Cost / Lesson</span>
+                        <span class="metric-value">Per Job</span>
+                        <span class="metric-label">Cost Report</span>
                     </div>
                 </div>
             </div>
@@ -189,6 +189,75 @@
                             </button>
                         </div>
                     </div>
+
+                    <!-- Lesson Direction -->
+                    <section class="lesson-direction-panel" aria-labelledby="lesson-direction-title">
+                        <div class="lesson-direction-heading">
+                            <div>
+                                <p class="section-eyebrow">Teaching strategy</p>
+                                <h2 id="lesson-direction-title">Lesson direction</h2>
+                            </div>
+                            <span class="lesson-default-badge">General by default</span>
+                        </div>
+
+                        <div class="lesson-direction-grid">
+                            <div class="form-group">
+                                <label for="explanation-mode-select" class="form-label">
+                                    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                                    </svg>
+                                    <span>Explanation mode</span>
+                                </label>
+                                <div class="select-wrapper">
+                                    <select id="explanation-mode-select" class="form-select"
+                                        aria-describedby="explanation-mode-help">
+                                        <option value="general" selected>General — Balanced explanation</option>
+                                        <option value="conceptual_intuition">Conceptual Intuition — Meaning before notation</option>
+                                        <option value="worked_example">Worked Example — Solve one problem step by step</option>
+                                        <option value="derivation_visual_proof">Derivation & Visual Proof — Build the result logically</option>
+                                        <option value="graphical_exploration">Graphical Exploration — Learn through changing graphs</option>
+                                        <option value="exam_technique">Exam Technique — Method, working and common traps</option>
+                                        <option value="misconception_repair">Misconception Repair — Diagnose and correct an error</option>
+                                        <option value="revision_recap">Revision Recap — Retrieval cues and essentials</option>
+                                    </select>
+                                </div>
+                                <p id="explanation-mode-help" class="field-help">
+                                    Controls how the script reasons and how each animation teaches.
+                                </p>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="curriculum-profile-select" class="form-label">
+                                    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M3 6l9-4 9 4-9 4-9-4z"/>
+                                        <path d="M7 8.2V14c0 2 2.2 4 5 4s5-2 5-4V8.2"/>
+                                        <path d="M21 6v7"/>
+                                    </svg>
+                                    <span>Curriculum alignment</span>
+                                </label>
+                                <div class="select-wrapper">
+                                    <select id="curriculum-profile-select" class="form-select"
+                                        aria-describedby="curriculum-profile-help">
+                                        <option value="general" selected>General — No exam-board assumptions</option>
+                                        <option value="aqa_a_level_mathematics">AQA A-Level Mathematics (7357)</option>
+                                    </select>
+                                </div>
+                                <p id="curriculum-profile-help" class="field-help">
+                                    Choose AQA only when the lesson should follow A-Level Mathematics conventions.
+                                </p>
+                            </div>
+
+                            <div id="lesson-direction-summary" class="lesson-direction-summary"
+                                role="status" aria-live="polite" aria-atomic="true">
+                                <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="9"/>
+                                    <path d="M12 8h.01M11 12h1v4h1"/>
+                                </svg>
+                                <span>Balanced explanation with no exam-board assumptions.</span>
+                            </div>
+                        </div>
+                    </section>
 
                     <!-- Primary Controls Row -->
                     <div class="controls-grid">
@@ -303,12 +372,12 @@
                                 <!-- Checkbox Group -->
                                 <div class="checkbox-grid">
                                     <label class="custom-checkbox">
-                                        <input type="checkbox" id="bypass-cache-checkbox">
+                                        <input type="checkbox" id="bypass-cache-checkbox" autocomplete="off">
                                         <span class="checkbox-box"></span>
                                         <span class="checkbox-text">Bypass TTS Cache (Force Re-synthesis)</span>
                                     </label>
                                     <label class="custom-checkbox">
-                                        <input type="checkbox" id="bypass-scene-cache-checkbox">
+                                        <input type="checkbox" id="bypass-scene-cache-checkbox" autocomplete="off">
                                         <span class="checkbox-box"></span>
                                         <span class="checkbox-text">Bypass Scene Cache (Force Manim Re-rendering)</span>
                                     </label>
@@ -373,10 +442,10 @@
                 <div id="progress-section" class="progress-section hidden">
                     <div class="progress-hud-header">
                         <div class="progress-title-block">
-                            <div class="pulsing-spinner"></div>
+                            <div class="pulsing-spinner" id="progress-spinner" aria-hidden="true"></div>
                             <div>
-                                <h3 class="progress-title">Orchestrating AI Video Pipeline</h3>
-                                <span class="progress-subtitle">Compiling script, audio synthesis, and Manim geometry</span>
+                                <h3 class="progress-title" id="progress-title">Orchestrating AI Video Pipeline</h3>
+                                <span class="progress-subtitle" id="progress-subtitle">Compiling script, audio synthesis, and Manim geometry</span>
                             </div>
                         </div>
                         <div class="progress-metrics">
@@ -456,6 +525,12 @@
                             </div>
                             <span id="mini-progress-text" class="mini-progress-text">0% &mdash; Idle</span>
                         </div>
+                    </div>
+                    <div class="review-actions-bar hidden" id="recovery-actions">
+                        <button type="button" class="btn-secondary" id="retry-failed-btn">
+                            Retry Failed Scenes
+                        </button>
+                        <span>Successful narration and rendered scenes will be reused.</span>
                     </div>
                 </div>
 
@@ -547,7 +622,7 @@
                         </svg>
                     </div>
                     <h3 class="bento-title">Multi-LLM Routing &amp; Fallback</h3>
-                    <p class="bento-desc">Automatic model failover across Gemini 1.5 Flash, Claude, and OpenAI to guarantee uninterrupted script generation.</p>
+                    <p class="bento-desc">Provider-aware routing supports Gemini, Claude, and OpenAI, with explicit diagnostics when a selected strict-mode provider fails.</p>
                 </div>
 
                 <div class="bento-card">
@@ -570,7 +645,7 @@
                         </svg>
                     </div>
                     <h3 class="bento-title">Neural TTS Audio Alignment</h3>
-                    <p class="bento-desc">High-clarity text-to-speech narration with automatic per-scene duration synchronization down to the millisecond.</p>
+                    <p class="bento-desc">Text-to-speech narration is reconciled with measured per-scene audio durations before final video assembly.</p>
                 </div>
 
                 <div class="bento-card">
@@ -594,7 +669,7 @@
                         </svg>
                     </div>
                     <h3 class="bento-title">Deterministic Caching</h3>
-                    <p class="bento-desc">SHA-256 asset caching reuses generated audio and rendered scene videos for instant fast edits and re-compiles.</p>
+                    <p class="bento-desc">SHA-256 asset caching reuses compatible audio and rendered scenes to avoid unnecessary regeneration.</p>
                 </div>
 
                 <div class="bento-card">

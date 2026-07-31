@@ -16,6 +16,7 @@ from typing import Any, List, Optional
 from dotenv import load_dotenv
 
 from llm_service import LLMService, StatusCallback
+from learning_profiles import build_script_guidance
 from schemas import (
     TTS_WORDS_PER_SECOND,
     Scene,
@@ -76,9 +77,17 @@ def _duration_profile(target_duration: int) -> dict:
     }
 
 
-def _build_prompt(topic_name: str, target_duration: int) -> str:
+def _build_prompt(
+    topic_name: str,
+    target_duration: int,
+    explanation_mode: str = "general",
+    curriculum_profile: str = "general",
+) -> str:
     p = _duration_profile(target_duration)
+    profile_guidance = build_script_guidance(explanation_mode, curriculum_profile)
     return f"""Develop an educational script for this topic: {topic_name}
+
+{profile_guidance}
 
 INSTRUCTIONS:
 - Create an engaging and educational script about the topic
@@ -164,8 +173,16 @@ Respond ONLY with a valid JSON array, where each element has this structure:
 IMPORTANT: Respond ONLY with the JSON array, without any additional text before or after."""
 
 
-def _build_repair_prompt(topic_name: str, target_duration: int, raw_output: str, error: str) -> str:
+def _build_repair_prompt(
+    topic_name: str,
+    target_duration: int,
+    raw_output: str,
+    error: str,
+    explanation_mode: str = "general",
+    curriculum_profile: str = "general",
+) -> str:
     truncated = raw_output[:2000]
+    profile_guidance = build_script_guidance(explanation_mode, curriculum_profile)
     return f"""Your previous response was NOT valid according to the required schema.
 
 VALIDATION ERROR:
@@ -175,6 +192,8 @@ Your previous (invalid) output was:
 {truncated}
 
 Please regenerate a CORRECT educational script for the topic: {topic_name}
+
+{profile_guidance}
 
 REQUIREMENTS (all fields are REQUIRED and must be non-empty strings):
 - "chapter", "text", "animation", "objective", "explanation"
@@ -188,20 +207,71 @@ def estimate_script_seconds(scenes: List[dict]) -> float:
     return sum(estimate_narration_seconds(s.get("text", "")) for s in scenes)
 
 
+def validate_duration_seconds(
+    estimated: float,
+    target_duration: int,
+    min_ratio: float = 0.90,
+    max_ratio: float = 1.15,
+    source: str = "Script",
+) -> float:
+    """Return a measured duration or reject a material target mismatch."""
+    target = max(10, int(target_duration or 60))
+    ratio = estimated / target
+    if min_ratio <= ratio <= max_ratio:
+        return estimated
+    low = round(target * min_ratio)
+    high = round(target * max_ratio)
+    raise ScriptValidationError(
+        f"{source} duration does not match the requested video length: "
+        f"estimated {estimated:.0f}s for a {target}s request "
+        f"(acceptable range {low}-{high}s). Regenerate or expand the narration "
+        "before rendering."
+    )
+
+
+def validate_script_duration(
+    scenes: List[dict],
+    target_duration: int,
+    min_ratio: float = 0.90,
+    max_ratio: float = 1.15,
+) -> float:
+    """Return estimated script duration or reject a material mismatch."""
+    return validate_duration_seconds(
+        estimate_script_seconds(scenes),
+        target_duration,
+        min_ratio,
+        max_ratio,
+        source="Script",
+    )
+
+
 def _build_length_repair_prompt(
-    topic_name: str, target_duration: int, scenes: List[dict], estimated: float
+    topic_name: str,
+    target_duration: int,
+    scenes: List[dict],
+    estimated: float,
+    explanation_mode: str = "general",
+    curriculum_profile: str = "general",
 ) -> str:
     """Ask for a longer/shorter script, keeping the existing structure intact."""
     p = _duration_profile(target_duration)
     direction = "TOO SHORT" if estimated < target_duration else "TOO LONG"
     verb = ("EXPAND the narration" if estimated < target_duration
             else "TIGHTEN the narration")
-    current = json.dumps(scenes, ensure_ascii=False, indent=1)[:6000]
+    # Three-minute scripts commonly exceed the old 6 KB limit. Truncating the
+    # current script made the length repair omit its later scenes.
+    current = json.dumps(scenes, ensure_ascii=False, indent=1)[:20000]
+    profile_guidance = build_script_guidance(
+        explanation_mode,
+        curriculum_profile,
+    )
 
     return f"""Your script for "{topic_name}" is {direction}.
 
 MEASURED: about {estimated:.0f} seconds of narration.
 REQUIRED: about {target_duration} seconds ({p['total_words']} words total).
+
+{profile_guidance}
 
 {verb} so the script actually runs ~{target_duration} seconds:
 - Keep the SAME scenes, order, chapters, objectives and animations wherever possible.
@@ -225,16 +295,16 @@ def _enforce_target_duration(
     client: Any,
     target_duration: int,
     status: StatusCallback = None,
-    min_ratio: float = 0.80,
-    max_ratio: float = 1.30,
+    min_ratio: float = 0.90,
+    max_ratio: float = 1.15,
+    explanation_mode: str = "general",
+    curriculum_profile: str = "general",
 ) -> List[dict]:
     """Ensure the script can actually fill the requested duration.
 
     Video length is set purely by narration length, and nothing previously
-    checked it — a 120s request shipped as a 58s video. If the estimate is well
-    outside the target, make ONE repair request to resize the narration. The
-    repaired script is kept only if it is genuinely closer to target, so this can
-    never make the result worse.
+    checked it — a 120s request shipped as a 58s video. Make at most two focused
+    repair requests, then reject a remaining mismatch before expensive rendering.
     """
     target = int(target_duration or 60)
     estimated = estimate_script_seconds(scenes)
@@ -256,30 +326,49 @@ def _enforce_target_duration(
         except Exception:
             pass
 
-    print(f"[LENGTH] Outside tolerance — one repair to reach ~{target}s")
-    try:
-        repair = service.generate(
-            role="repair",
-            system=_SYSTEM_INSTRUCTION,
-            prompt=_build_length_repair_prompt(topic_name, target, scenes, estimated),
-            provider=provider,
-            client=client,
-            response_schema=list[Scene],
-        )
-        resized = parse_script_from_text(repair.text).as_scene_dicts()
-    except (ScriptValidationError, Exception) as exc:
-        print(f"[LENGTH] Resize failed, keeping original script: {exc}")
-        return scenes
+    current = scenes
+    current_estimated = estimated
+    print(f"[LENGTH] Outside tolerance — up to two repairs to reach ~{target}s")
+    for attempt in range(1, 3):
+        try:
+            repair = service.generate(
+                role="repair",
+                system=_SYSTEM_INSTRUCTION,
+                prompt=_build_length_repair_prompt(
+                    topic_name,
+                    target,
+                    current,
+                    current_estimated,
+                    explanation_mode=explanation_mode,
+                    curriculum_profile=curriculum_profile,
+                ),
+                provider=provider,
+                client=client,
+                response_schema=list[Scene],
+            )
+            resized = parse_script_from_text(repair.text).as_scene_dicts()
+        except Exception as exc:
+            print(f"[LENGTH] Resize attempt {attempt} failed: {exc}")
+            break
 
-    new_estimated = estimate_script_seconds(resized)
-    # Keep the resize only if it moved us closer to the target.
-    if abs(new_estimated - target) < abs(estimated - target):
-        print(f"[OK] Script resized: ~{estimated:.0f}s -> ~{new_estimated:.0f}s "
-              f"({len(resized)} scenes)")
-        return resized
+        new_estimated = estimate_script_seconds(resized)
+        if abs(new_estimated - target) < abs(current_estimated - target):
+            print(
+                f"[OK] Script resize {attempt}: ~{current_estimated:.0f}s -> "
+                f"~{new_estimated:.0f}s ({len(resized)} scenes)"
+            )
+            current = resized
+            current_estimated = new_estimated
+            if min_ratio <= current_estimated / target <= max_ratio:
+                return current
+        else:
+            print(
+                f"[LENGTH] Resize attempt {attempt} did not improve "
+                f"(~{new_estimated:.0f}s)"
+            )
 
-    print(f"[LENGTH] Resize did not improve (~{new_estimated:.0f}s); keeping original")
-    return scenes
+    validate_script_duration(current, target, min_ratio, max_ratio)
+    return current  # pragma: no cover
 
 
 def generate_script(
@@ -289,6 +378,8 @@ def generate_script(
     client: Any = None,
     target_duration: int = 60,
     status: StatusCallback = None,
+    explanation_mode: str = "general",
+    curriculum_profile: str = "general",
 ) -> List[dict]:
     """Generate and validate an educational script.
 
@@ -302,7 +393,12 @@ def generate_script(
         llm_service.LLMError: if generation fails at the provider level.
     """
     target_duration = int(target_duration or 60)
-    prompt = _build_prompt(topic_name, target_duration)
+    prompt = _build_prompt(
+        topic_name,
+        target_duration,
+        explanation_mode=explanation_mode,
+        curriculum_profile=curriculum_profile,
+    )
 
     result = service.generate(
         role="script",
@@ -319,13 +415,21 @@ def generate_script(
         return _enforce_target_duration(
             script.as_scene_dicts(), service, topic_name, provider, client,
             target_duration, status,
+            explanation_mode=explanation_mode,
+            curriculum_profile=curriculum_profile,
         )
     except ScriptValidationError as first_error:
         print(f"[VALIDATION] Script invalid, attempting one repair: {first_error}")
+        validation_error = str(first_error)
 
     # One controlled repair attempt using the current provider/repair model.
     repair_prompt = _build_repair_prompt(
-        topic_name, target_duration, result.text, str(first_error)
+        topic_name,
+        target_duration,
+        result.text,
+        validation_error,
+        explanation_mode=explanation_mode,
+        curriculum_profile=curriculum_profile,
     )
     repair_result = service.generate(
         role="repair",
@@ -341,6 +445,8 @@ def generate_script(
         return _enforce_target_duration(
             script.as_scene_dicts(), service, topic_name, provider, client,
             target_duration, status,
+            explanation_mode=explanation_mode,
+            curriculum_profile=curriculum_profile,
         )
     except ScriptValidationError as repair_error:
         raise ScriptValidationError(

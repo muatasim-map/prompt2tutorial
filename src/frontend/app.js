@@ -6,6 +6,9 @@ const videoForm = document.getElementById('video-form');
 const topicInput = document.getElementById('topic-input');
 const llmSelect = document.getElementById('llm-select');
 const durationSelect = document.getElementById('duration-select');
+const explanationModeSelect = document.getElementById('explanation-mode-select');
+const curriculumProfileSelect = document.getElementById('curriculum-profile-select');
+const lessonDirectionSummary = document.getElementById('lesson-direction-summary');
 const ttsToggle = document.getElementById('tts-toggle');
 const generateBtn = document.getElementById('generate-btn');
 const progressSection = document.getElementById('progress-section');
@@ -51,6 +54,11 @@ const ttsRateValue = document.getElementById('tts-rate-value');
 const bypassCacheCheckbox = document.getElementById('bypass-cache-checkbox');
 const bypassSceneCacheCheckbox = document.getElementById('bypass-scene-cache-checkbox');
 
+// Cache bypass is a one-off diagnostic action, never a sticky browser default.
+// Browsers may restore checkbox state across reloads unless reset explicitly.
+if (bypassCacheCheckbox) bypassCacheCheckbox.checked = false;
+if (bypassSceneCacheCheckbox) bypassSceneCacheCheckbox.checked = false;
+
 // Scene Review Elements
 const reviewSection = document.getElementById('review-section');
 const scenesContainer = document.getElementById('scenes-container');
@@ -61,6 +69,10 @@ const reviewStats = document.getElementById('review-stats');
 // Theme + elapsed timer elements
 const themeToggle = document.getElementById('theme-toggle');
 const progressElapsed = document.getElementById('progress-elapsed');
+const progressTitle = document.getElementById('progress-title');
+const progressSubtitle = document.getElementById('progress-subtitle');
+const recoveryActions = document.getElementById('recovery-actions');
+const retryFailedBtn = document.getElementById('retry-failed-btn');
 
 // Progress steps
 const steps = {
@@ -80,6 +92,39 @@ let lastLoggedMessage = null;
 let lastLoggedSeq = 0;
 let jobStartTime = null;
 let elapsedInterval = null;
+
+const EXPLANATION_MODE_DESCRIPTIONS = Object.freeze({
+    general: 'Balanced explanation using the strongest structure for the topic.',
+    conceptual_intuition: 'Builds meaning from a concrete visual model before formal notation.',
+    worked_example: 'Solves one coherent problem with every reasoning and calculation step visible.',
+    derivation_visual_proof: 'Builds the result from assumptions so each implication is visually justified.',
+    graphical_exploration: 'Uses accurate axes, parameters and graph transformations as the main explanation.',
+    exam_technique: 'Emphasizes command words, method choice, mark-earning working, checks and common traps.',
+    misconception_repair: 'Shows a plausible wrong step, diagnoses it and transforms it into the correct model.',
+    revision_recap: 'Prioritizes recognition cues, essential results, one compact example and common traps.'
+});
+
+function updateLessonDirectionSummary() {
+    if (!lessonDirectionSummary) return;
+
+    const mode = explanationModeSelect ? explanationModeSelect.value : 'general';
+    const curriculum = curriculumProfileSelect ? curriculumProfileSelect.value : 'general';
+    const modeDescription = EXPLANATION_MODE_DESCRIPTIONS[mode]
+        || EXPLANATION_MODE_DESCRIPTIONS.general;
+    const curriculumDescription = curriculum === 'aqa_a_level_mathematics'
+        ? 'Aligned to AQA A-Level Mathematics (7357).'
+        : 'No exam-board assumptions.';
+    const summaryText = lessonDirectionSummary.querySelector('span');
+    if (summaryText) summaryText.textContent = `${modeDescription} ${curriculumDescription}`;
+}
+
+if (explanationModeSelect) {
+    explanationModeSelect.addEventListener('change', updateLessonDirectionSummary);
+}
+if (curriculumProfileSelect) {
+    curriculumProfileSelect.addEventListener('change', updateLessonDirectionSummary);
+}
+updateLessonDirectionSummary();
 
 // Theme toggle
 if (themeToggle) {
@@ -127,6 +172,23 @@ function updateElapsedDisplay() {
     progressElapsed.textContent = `${mm}:${ss}`;
 }
 
+function setProgressPresentation(state) {
+    const failed = state === 'failed';
+    if (progressSection) {
+        progressSection.classList.toggle('is-failed', failed);
+    }
+    if (progressTitle) {
+        progressTitle.textContent = failed
+            ? 'Generation stopped'
+            : 'Orchestrating AI Video Pipeline';
+    }
+    if (progressSubtitle) {
+        progressSubtitle.textContent = failed
+            ? 'Review the error below, then generate again after correcting the issue.'
+            : 'Compiling script, audio synthesis, and Manim geometry';
+    }
+}
+
 // Form submission
 videoForm.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -169,7 +231,9 @@ videoForm.addEventListener('submit', async (e) => {
                 tts_rate: rateStr,
                 bypass_cache: bypassCacheCheckbox ? bypassCacheCheckbox.checked : false,
                 bypass_scene_cache: bypassSceneCacheCheckbox ? bypassSceneCacheCheckbox.checked : false,
-                target_duration: durationSelect ? parseInt(durationSelect.value) : 60
+                target_duration: durationSelect ? parseInt(durationSelect.value) : 60,
+                explanation_mode: explanationModeSelect ? explanationModeSelect.value : 'general',
+                curriculum_profile: curriculumProfileSelect ? curriculumProfileSelect.value : 'general'
             })
         });
 
@@ -189,6 +253,11 @@ videoForm.addEventListener('submit', async (e) => {
 
         addLog(`[OK] [SYSTEM] Job initialized: ${currentJobId}`, 'success');
         addLog(`[INFO] [SYSTEM] Topic: ${topic}`);
+        addLog(
+            `[INFO] [SYSTEM] Lesson direction: `
+            + `${explanationModeSelect ? explanationModeSelect.value : 'general'} / `
+            + `${curriculumProfileSelect ? curriculumProfileSelect.value : 'general'}`
+        );
 
         // Start polling for progress
         startProgressPolling();
@@ -223,7 +292,13 @@ function startProgressPolling() {
             } else if (data.status === 'failed') {
                 stopProgressPolling();
                 stopElapsedTimer();
-                addLog(`[ERR] [SYSTEM] Generation failed: ${data.error}`, 'error');
+                setProgressPresentation('failed');
+                const failure = data.metadata && data.metadata.failure;
+                const stage = failure && failure.stage ? ` at ${failure.stage}` : '';
+                addLog(`[ERR] [SYSTEM] Generation failed${stage}: ${data.error}`, 'error');
+                if (recoveryActions && data.video_data) {
+                    recoveryActions.classList.remove('hidden');
+                }
                 resetForm();
             } else if (data.status === 'awaiting_review') {
                 stopProgressPolling();
@@ -377,6 +452,7 @@ function addLog(rawMessage, type = 'info') {
 }
 
 function resetProgress() {
+    setProgressPresentation('running');
     updateProgressBar(0);
     Object.values(steps).forEach(step => {
         step.classList.remove('active', 'completed');
@@ -388,6 +464,34 @@ function resetProgress() {
     if (reviewSection) {
         reviewSection.classList.add('hidden');
     }
+    if (recoveryActions) recoveryActions.classList.add('hidden');
+}
+
+if (retryFailedBtn) {
+    retryFailedBtn.addEventListener('click', async () => {
+        if (!currentJobId) return;
+        retryFailedBtn.disabled = true;
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/generate/retry`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({job_id: currentJobId})
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || `Recovery failed (HTTP ${response.status})`);
+            }
+            recoveryActions.classList.add('hidden');
+            setProgressPresentation('running');
+            addLog('[INFO] [SYSTEM] Recovery started; reusing successful cached artifacts.');
+            startElapsedTimer();
+            startProgressPolling();
+        } catch (error) {
+            addLog(`[ERR] [SYSTEM] ${error.message}`, 'error');
+        } finally {
+            retryFailedBtn.disabled = false;
+        }
+    });
 }
 
 function resetForm() {
@@ -1477,6 +1581,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!nativeLabel.id) nativeLabel.id = `${select.id}-label`;
                 trigger.setAttribute('aria-labelledby', nativeLabel.id);
             }
+            const describedBy = select.getAttribute('aria-describedby');
+            if (describedBy) trigger.setAttribute('aria-describedby', describedBy);
 
             const selectedOption = select.options[select.selectedIndex] || select.options[0];
             const triggerText = document.createElement('span');
@@ -1571,7 +1677,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 wrapper.classList.add('glass-open');
                 const formGroup = wrapper.closest('.form-group');
                 if (formGroup) formGroup.classList.add('glass-open');
-                const controlsGrid = wrapper.closest('.controls-grid, .advanced-grid');
+                const controlsGrid = wrapper.closest(
+                    '.controls-grid, .advanced-grid, .lesson-direction-grid'
+                );
                 if (controlsGrid) controlsGrid.classList.add('glass-open');
                 setActive(select.selectedIndex);
             };
@@ -1585,7 +1693,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 // its ancestors stacked above the rest of the page.
                 wrapper.classList.remove('glass-open');
                 wrapper.closest('.form-group')?.classList.remove('glass-open');
-                wrapper.closest('.controls-grid, .advanced-grid')?.classList.remove('glass-open');
+                wrapper.closest(
+                    '.controls-grid, .advanced-grid, .lesson-direction-grid'
+                )?.classList.remove('glass-open');
             };
 
             trigger.addEventListener('click', (e) => {

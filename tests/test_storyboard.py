@@ -153,6 +153,68 @@ def test_generate_storyboard_repairs_on_diversity_violation():
     assert getattr(sb, "_residual_violations") == []
 
 
+def test_decorative_true_3d_is_downgraded_to_layered_2_5d():
+    data = _diverse_storyboard(3)
+    scene = data["scenes"][0]
+    scene.update({
+        "dimension": "3d",
+        "learning_goal": "Show why manually tuning many parameters is impractical.",
+        "key_concept": "Automation is necessary when a model has many weights.",
+        "camera_plan": "Orbit a huge wall of control dials.",
+    })
+    sb = parse_storyboard(data)
+
+    downgraded = sb_mod.apply_render_cost_policy(sb)
+
+    assert downgraded == [1]
+    assert sb.scenes[0].dimension == "2.5d"
+    assert "Fixed frame" in sb.scenes[0].camera_plan
+
+
+def test_conceptually_spatial_true_3d_is_preserved():
+    data = _diverse_storyboard(3)
+    scene = data["scenes"][0]
+    scene.update({
+        "dimension": "3d",
+        "learning_goal": "Understand how a plane intersects a sphere in 3-space.",
+        "key_concept": "The cross-section is a circle on a genuinely spatial surface.",
+    })
+    sb = parse_storyboard(data)
+
+    assert sb_mod.apply_render_cost_policy(sb) == []
+    assert sb.scenes[0].dimension == "3d"
+
+
+def test_loss_landscape_true_3d_is_preserved():
+    data = _diverse_storyboard(3)
+    scene = data["scenes"][0]
+    scene.update({
+        "dimension": "3d",
+        "learning_goal": "Illustrate convergence over training epochs.",
+        "key_concept": "Gradient updates minimize the loss function over time.",
+        "visual_metaphor": "A ball descending a topographical loss landscape.",
+    })
+    sb = parse_storyboard(data)
+
+    assert sb_mod.apply_render_cost_policy(sb) == []
+    assert sb.scenes[0].dimension == "3d"
+
+
+def test_surface_tension_cross_section_does_not_force_true_3d():
+    data = _diverse_storyboard(3)
+    scene = data["scenes"][0]
+    scene.update({
+        "dimension": "3d",
+        "learning_goal": "Explain the surface tension between packed wax cells.",
+        "key_concept": "Round cross-sections flatten into hexagons.",
+        "visual_metaphor": "A cross-sectional view of touching soap bubbles.",
+    })
+    sb = parse_storyboard(data)
+
+    assert sb_mod.apply_render_cost_policy(sb) == [1]
+    assert sb.scenes[0].dimension == "2.5d"
+
+
 # --- prompt construction receives storyboard + ledger ---------------------- #
 
 def test_manim_prompt_includes_storyboard_and_ledger():

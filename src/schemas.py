@@ -12,6 +12,7 @@ fields are strictly validated.
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 from typing import Any, List, Optional
@@ -136,6 +137,24 @@ class VideoScript(BaseModel):
         return [s.model_dump() for s in self.scenes]
 
 
+_VISUAL_PRIMITIVE_NAMES = {
+    "TYPE_SCALE", "MIN_READABLE_FONT_SIZE", "PALETTE",
+    "styled_title", "body_text", "caption", "make_node", "make_box", "connect",
+    "token_chip", "prob_bar", "highlight", "row", "column", "grid",
+    "fit_to_frame", "focus_on", "restore_focus", "morph", "reveal",
+    "clear_scene", "make_code_terminal", "make_array_grid",
+}
+_KNOWN_INVALID_MANIM_NAMES = {
+    "CYAN", "AMBER", "MAGENTA", "LIME", "ORANGE_D", "TRANSPARENT", "Right",
+    "Animate", "GrowFromBottom",
+}
+_KNOWN_INVALID_MANIM_KEYWORDS = {"DIRECTION"}
+_KNOWN_INVALID_MANIM_METHODS = {"stretch_in_place", "scale_in_place"}
+_QUALIFIED_RATE_FUNCTIONS = {
+    "ease_in_cubic", "ease_out_cubic", "ease_in_out_cubic",
+}
+
+
 class ManimCode(BaseModel):
     """Validated Manim code payload returned by the animation model."""
 
@@ -163,6 +182,128 @@ class ManimCode(BaseModel):
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value or ""):
             raise ValueError("class_name must be a valid Python identifier")
         return value
+
+    @model_validator(mode="after")
+    def _source_is_importable_manim_scene(self) -> "ManimCode":
+        try:
+            tree = ast.parse(self.content)
+        except SyntaxError as exc:
+            raise ValueError(
+                f"manim code must be valid Python (line {exc.lineno}: {exc.msg})"
+            ) from exc
+
+        imports_manim = any(
+            (isinstance(node, ast.Import) and any(alias.name == "manim" for alias in node.names))
+            or (isinstance(node, ast.ImportFrom) and node.module == "manim")
+            for node in tree.body
+        )
+        if not imports_manim:
+            raise ValueError("manim code must import manim")
+
+        declared = next(
+            (
+                node for node in tree.body
+                if isinstance(node, ast.ClassDef) and node.name == self.class_name
+            ),
+            None,
+        )
+        if declared is None:
+            raise ValueError(f"manim code must define class {self.class_name}")
+        base_names = [
+            base.id if isinstance(base, ast.Name)
+            else base.attr if isinstance(base, ast.Attribute)
+            else ""
+            for base in declared.bases
+        ]
+        if not any(name.endswith("Scene") for name in base_names):
+            raise ValueError(f"class {self.class_name} must inherit from a Manim Scene")
+
+        names_used = {
+            node.id for node in ast.walk(tree) if isinstance(node, ast.Name)
+        }
+        invalid_names = sorted(names_used & _KNOWN_INVALID_MANIM_NAMES)
+        if invalid_names:
+            raise ValueError(
+                "unsupported Manim name(s): "
+                + ", ".join(invalid_names)
+                + "; use a verified Manim built-in (or #RRGGBB for colors)"
+            )
+
+        invalid_keywords = sorted({
+            keyword.arg
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            for keyword in node.keywords
+            if keyword.arg in _KNOWN_INVALID_MANIM_KEYWORDS
+        })
+        invalid_methods = sorted({
+            node.func.attr
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in _KNOWN_INVALID_MANIM_METHODS
+        })
+        if invalid_keywords or invalid_methods:
+            problems = invalid_keywords + invalid_methods
+            raise ValueError(
+                "unsupported Manim keyword/method(s): "
+                + ", ".join(problems)
+                + "; remove the invented API before rendering"
+            )
+
+        list_names = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.List):
+                list_names.update(
+                    target.id for target in node.targets
+                    if isinstance(target, ast.Name)
+                )
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.value, ast.List):
+                if isinstance(node.target, ast.Name):
+                    list_names.add(node.target.id)
+        list_add_calls = sorted({
+            node.func.value.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "add"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id in list_names
+        })
+        if list_add_calls:
+            raise ValueError(
+                "Python list(s) use .add(): "
+                + ", ".join(list_add_calls)
+                + "; use .append() for a list"
+            )
+
+        bare_easing = sorted(names_used & _QUALIFIED_RATE_FUNCTIONS)
+        if bare_easing:
+            qualified = ", ".join(f"rate_functions.{name}" for name in bare_easing)
+            raise ValueError(
+                f"CSS-style easing must be qualified in this environment: {qualified}"
+            )
+
+        helpers_used = names_used & _VISUAL_PRIMITIVE_NAMES
+        imported_helpers = set()
+        imports_all_helpers = False
+        for node in tree.body:
+            if isinstance(node, ast.ImportFrom) and node.module == "visual_primitives":
+                for alias in node.names:
+                    if alias.name == "*":
+                        imports_all_helpers = True
+                    else:
+                        imported_helpers.add(alias.asname or alias.name)
+        missing_helpers = sorted(
+            helpers_used - imported_helpers if not imports_all_helpers else set()
+        )
+        if missing_helpers:
+            raise ValueError(
+                "visual_primitives helper(s) used without import: "
+                + ", ".join(missing_helpers)
+                + "; add `from visual_primitives import ...`"
+            )
+        return self
 
 
 # --------------------------------------------------------------------------- #
@@ -205,6 +346,23 @@ _DOMAIN_TAG_SET = set(DOMAIN_TAGS)
 # ~5.2k all-domain block this replaced, so headroom is not the constraint.
 MAX_SECONDARY_DOMAIN_TAGS = 3
 MAX_TOTAL_DOMAIN_TAGS = 4
+
+# Optional, finer routing within A-level Mathematics. Domain tags remain the
+# cross-subject visual vocabulary; this field selects the exact syllabus skill.
+A_LEVEL_MATH_TOPICS = (
+    "algebra_functions",
+    "graphs",
+    "coordinate_geometry",
+    "sequences_series",
+    "trigonometry",
+    "exponentials_logarithms",
+    "differentiation",
+    "integration",
+    "numerical_methods",
+    "vectors",
+    "statistics",
+)
+_A_LEVEL_MATH_TOPIC_SET = set(A_LEVEL_MATH_TOPICS)
 
 
 def _clean_optional(value: Any) -> Optional[str]:
@@ -347,6 +505,18 @@ class VisualBeat(BaseModel):
     action: str = Field(..., description="The meaningful visual change")
     objects: List[str] = Field(
         default_factory=list, description="Objects involved in this beat")
+    narration_cue: Optional[str] = Field(
+        default=None,
+        description="Short narration phrase that should trigger this visual change",
+    )
+    focus_object: Optional[str] = Field(
+        default=None,
+        description="The single object that should lead the viewer's attention",
+    )
+    emphasis: Optional[str] = Field(
+        default=None,
+        description="Attention level: primary, secondary, context, or none",
+    )
 
     @field_validator("action", mode="before")
     @classmethod
@@ -366,6 +536,22 @@ class VisualBeat(BaseModel):
         if not isinstance(value, list):
             return []
         return [_normalize_ws(str(v)) for v in value if _normalize_ws(str(v))][:6]
+
+    @field_validator("narration_cue", "focus_object", mode="before")
+    @classmethod
+    def _clean_beat_optional_text(cls, value: Any) -> Optional[str]:
+        cleaned = _clean_optional(value)
+        if not cleaned:
+            return None
+        return cleaned[:MAX_STORYBOARD_FIELD_CHARS]
+
+    @field_validator("emphasis", mode="before")
+    @classmethod
+    def _coerce_emphasis(cls, value: Any) -> Optional[str]:
+        cleaned = (_clean_optional(value) or "").lower()
+        if not cleaned:
+            return None
+        return cleaned if cleaned in {"primary", "secondary", "context", "none"} else None
 
     @field_validator("at_seconds", mode="before")
     @classmethod
@@ -416,6 +602,10 @@ class StoryboardScene(BaseModel):
     secondary_domain_tags: List[str] = Field(
         default_factory=list,
         description="0-3 secondary domain tags from DOMAIN_TAGS, distinct from the primary")
+    a_level_math_topic: Optional[str] = Field(
+        default=None,
+        description="Optional exact A-level Mathematics syllabus topic",
+    )
 
     # Video-level narrative arc + continuity mode + semantic colors. All
     # optional/defaulted for backward compatibility with scenes stored before
@@ -580,6 +770,27 @@ class StoryboardScene(BaseModel):
                 f"unknown domain tag '{cleaned}'; must be one of: {', '.join(DOMAIN_TAGS)}"
             )
         return tag
+
+    @field_validator("a_level_math_topic", mode="before")
+    @classmethod
+    def _norm_a_level_math_topic(cls, value: Any) -> Optional[str]:
+        cleaned = _clean_optional(value)
+        if not cleaned:
+            return None
+        topic = cleaned.lower().replace("&", "and")
+        topic = re.sub(r"[^a-z0-9]+", "_", topic).strip("_")
+        aliases = {
+            "algebra_and_functions": "algebra_functions",
+            "sequences_and_series": "sequences_series",
+            "exponentials_and_logarithms": "exponentials_logarithms",
+        }
+        topic = aliases.get(topic, topic)
+        if topic not in _A_LEVEL_MATH_TOPIC_SET:
+            raise ValueError(
+                "unknown A-level mathematics topic "
+                f"'{cleaned}'; must be one of: {', '.join(A_LEVEL_MATH_TOPICS)}"
+            )
+        return topic
 
     @field_validator("secondary_domain_tags", mode="before")
     @classmethod
@@ -762,6 +973,22 @@ def parse_manim_code_from_text(raw: str) -> ManimCode:
     except json.JSONDecodeError as exc:
         raise ScriptValidationError(f"invalid JSON: {exc}") from exc
     return parse_manim_code(decoded)
+
+
+def extract_manim_candidate_from_text(raw: str) -> dict:
+    """Decode an unvalidated Manim payload so malformed source can be repaired."""
+    try:
+        decoded = _extract_json(raw)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    if not isinstance(decoded, dict):
+        return {}
+    content = decoded.get("content")
+    class_name = decoded.get("class_name")
+    return {
+        "content": content if isinstance(content, str) else "",
+        "class_name": class_name if isinstance(class_name, str) else "",
+    }
 
 
 # --------------------------------------------------------------------------- #
